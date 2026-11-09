@@ -26,6 +26,7 @@ const OVERLAY_CSS = `
   background:#0a2c21e6;border-bottom:calc(4px / var(--vz)) solid #d4a843;padding:calc(10px / var(--vz)) calc(40px / var(--vz)) calc(14px / var(--vz));
   border-radius:calc(10px / var(--vz));box-shadow:0 calc(8px / var(--vz)) calc(30px / var(--vz)) #0006;opacity:0;transition:opacity .45s}
 #vx-cap.on{opacity:1}
+#vx-cap.mid{bottom:calc(330px / var(--vz))}
 #vx-card{position:fixed;inset:0;z-index:2147483643;display:none;flex-direction:column;align-items:center;justify-content:center;
   background:radial-gradient(ellipse at 50% 40%,#1f5a43 0%,#0a2c21 70%);direction:rtl;color:#f3ead2;text-align:center;opacity:0;transition:opacity .8s}
 #vx-card.on{opacity:1}
@@ -143,8 +144,10 @@ const CURSOR_SVG = `<svg viewBox="0 0 24 24" width="100%" height="100%"><path d=
     await page.evaluate(([x, y, ms]) => window.__move(x, y, ms), [p.x, p.y, ms]);
     return p;
   };
-  const clickAt = async (target, after = 700) => {
-    const p = await moveTo(target);
+  const clickAt = async (target, after = 700, fy) => {
+    let t = target;
+    if (fy !== undefined) { const el = page.locator(target).first(); await el.scrollIntoViewIfNeeded(); const b = await el.boundingBox(); t = { x: b.x + b.width / 2, y: b.y + b.height * fy }; }
+    const p = await moveTo(t);
     await wait(180);
     clicks.push(now());
     await page.evaluate(() => window.__ripple());
@@ -208,6 +211,8 @@ const CURSOR_SVG = `<svg viewBox="0 0 24 24" width="100%" height="100%"><path d=
   await clickAt('#sf .btn', 2600);
   await caption('النتائج بعزوٍ كامل: الكتاب والجزء والصفحة');
   await moveTo('#results .card .ct >> nth=0'); await wait(2400);
+  await caption('أضف النتيجة إلى مسودتك بنقرة');
+  await clickAt('#results .card >> nth=0 >> [data-dadd]', 2200);
   await caption('وعلى الجانب: الكتب التي ورد فيها لفظك');
   await moveTo('#facet h3'); await wait(2000);
   await caption('اختر كتابًا لتحصر البحث فيه');
@@ -263,9 +268,31 @@ const CURSOR_SVG = `<svg viewBox="0 0 24 24" width="100%" height="100%"><path d=
     await caption('يُنسخ النصّ ومعه عزوه كاملًا');
     await wait(4200);
     await page.evaluate(() => document.getElementById('vx-paste').classList.remove('on'));
+    await caption('أو أضف ما حدّدته إلى المسودة');
+    await clickAt('#pvadd', 2200);
   }
   await wait(500);
   await clickAt('#pvclose', 1000);
+
+  // ٥ب. المسودة (جديد في ٠٫٩٫٣): العنوانُ أعلى قليلًا كي لا يغطّي الحواشي ورسالةَ الحفظ
+  await page.evaluate(() => document.getElementById('vx-cap').classList.add('mid'));
+  await caption('المسودة: اكتب كلامك، والنقول بين يديك بعزوها');
+  await clickAt('header nav button[data-p=draft]', 2200);
+  await moveTo('#dfn'); await wait(1600);
+  await caption('اكتب بين النقول كما تكتب في وورد');
+  await clickAt('#ded', 300, 0.95);
+  await page.keyboard.press('Control+End');
+  await page.keyboard.press('Enter');
+  await typeText('#ded', 'فهذه نصوصٌ في أنّ التوحيد إفرادُ الله بالعبادة.', true);
+  await wait(1200);
+  await caption('ولكلّ نقلٍ حكمُه: مطابقٌ لصفحته أو لا');
+  await clickAt('#ded .qt >> nth=0', 2600);
+  await page.keyboard.press('Escape').catch(() => {});
+  await caption('ثمّ أخرجها ملفَّ وورد، والعزوُ في حواشٍ حقيقيّة');
+  await clickAt('#ddocx', 3400);
+  await caption('');
+  await wait(500);
+  await page.evaluate(() => document.getElementById('vx-cap').classList.remove('mid'));
 
   // ٦. ألفاظٌ مجاورة
   await caption('ألفاظٌ مجاورة: ما يقترن بلفظٍ في كتبك');
@@ -323,7 +350,7 @@ const CURSOR_SVG = `<svg viewBox="0 0 24 24" width="100%" height="100%"><path d=
   await wait(700);
 
   // ١٠. الخاتمة
-  await card(`<img src="LOGO"><div class="t">بُغية</div><div class="l"></div><div class="s">الإصدار ٠٫٩٫٢</div>`, 5200);
+  await card(`<img src="LOGO"><div class="t">بُغية</div><div class="l"></div><div class="s">الإصدار ٠٫٩٫٣</div>`, 5200);
 
   await cdp.send('Page.stopScreencast');
   const t1 = now();
