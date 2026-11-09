@@ -31,7 +31,7 @@ def tool_cmd(tool: str, *args) -> list:
     return self_cmd("--tool", tool.removesuffix(".py"), *args)
 TOOLS = APP
 NAME = "Bughya"
-VERSION = "0.9.2"
+VERSION = "0.9.3"
 # صفحةُ الإصدارات: يسأل منها زرُّ التحديث عن آخر إصدارٍ منشور (ولا يُرسل شيئًا عن المستخدم ولا كتبه)
 RELEASES_API = "https://api.github.com/repos/omar209520-bot/bughya/releases/latest"
 DATA = pathlib.Path(os.environ.get("BUGHYA_HOME") or
