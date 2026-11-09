@@ -5,3 +5,5 @@ __pycache__/
 *.pyc
 *.spec
 docs/مقابلة-نص-القرآن.xlsx
+# إعدادات Claude المحلّية: قد تحفظ أوامر فيها كلمات مرور أو مفاتيح، فلا تُرفع
+.claude/settings.local.json
