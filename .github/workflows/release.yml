@@ -1,13 +1,18 @@
 # يبني نسخة ويندوز (مجلّد مضغوط + مثبِّت) ويرفعها في صفحة الإصدارات.
 #   إصدارٌ جديد:  git tag v0.9.4 && git push origin v0.9.4
 #   إصدارٌ تجريبيّ: git tag v0.9.4-beta1 && git push origin v0.9.4-beta1
-#   تجربة البناء بلا نشر: تبويب Actions ← Release ← Run workflow (تظهر الملفات في Artifacts)
+#   من المتصفّح: Actions ← Release ← Run workflow، واكتب الوسم (v0.9.4-beta1) للنشر، أو اتركه فارغًا لتجربة البناء بلا نشر
 name: Release
 
 on:
   push:
     tags: ["v*"]
   workflow_dispatch:
+    inputs:
+      tag:
+        description: "لنشر إصدار من المتصفّح اكتب الوسم (مثل v0.9.3-beta1). اتركه فارغًا لتجربة البناء بلا نشر."
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -30,14 +35,17 @@ jobs:
       - name: رقم الإصدار
         id: ver
         shell: bash
+        env:
+          TAG: ${{ github.event.inputs.tag || (github.ref_type == 'tag' && github.ref_name) || '' }}
         run: |
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           V=$(python -c "import re;print(re.search(r'VERSION\s*=\s*\"([^\"]+)\"',open('app/common.py',encoding='utf-8').read()).group(1))")
           echo "version=$V" >> "$GITHUB_OUTPUT"
           # الوسم v0.9.3 إصدار عادي، وv0.9.3-beta1 (أي لاحقة بعد شرطة) إصدار تجريبي
-          if [ "${GITHUB_REF_TYPE}" = "tag" ]; then
-            case "${GITHUB_REF_NAME}" in
+          if [ -n "$TAG" ]; then
+            case "$TAG" in
               "v$V"|"v$V"-*) ;;
-              *) echo "::error::الوسم ${GITHUB_REF_NAME} لا يطابق VERSION في app/common.py ($V)"; exit 1 ;;
+              *) echo "::error::الوسم $TAG لا يطابق VERSION في app/common.py ($V)"; exit 1 ;;
             esac
           fi
           grep -q "#define AppVer \"$V\"" installer/bughya.iss || { echo "::error::AppVer في bughya.iss لا يطابق $V"; exit 1; }
@@ -82,14 +90,15 @@ jobs:
             dist/SHA256SUMS.txt
 
       - name: نشر الإصدار
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: steps.ver.outputs.tag != ''
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.ver.outputs.tag }}
         run: |
           PRE=""
-          case "$GITHUB_REF_NAME" in *-*) PRE="--prerelease" ;; esac
-          gh release create "$GITHUB_REF_NAME" $PRE \
+          case "$TAG" in *-*) PRE="--prerelease" ;; esac
+          gh release create "$TAG" $PRE --target "$GITHUB_SHA" \
             --title "بُغية ${{ steps.ver.outputs.version }}" \
             --generate-notes \
             dist/*.zip dist/Bughya-Setup-*.exe dist/SHA256SUMS.txt
