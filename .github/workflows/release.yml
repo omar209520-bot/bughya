@@ -1,0 +1,83 @@
+# يبني نسخة ويندوز (مجلّد مضغوط + مثبِّت) ويرفعها في صفحة الإصدارات.
+#   إصدارٌ جديد:  git tag v0.9.4 && git push origin v0.9.4
+#   تجربة البناء بلا نشر: تبويب Actions ← Release ← Run workflow (تظهر الملفات في Artifacts)
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: رقم الإصدار
+        id: ver
+        shell: bash
+        run: |
+          V=$(python -c "import re;print(re.search(r'VERSION\s*=\s*\"([^\"]+)\"',open('app/common.py',encoding='utf-8').read()).group(1))")
+          echo "version=$V" >> "$GITHUB_OUTPUT"
+          if [ "${GITHUB_REF_TYPE}" = "tag" ] && [ "${GITHUB_REF_NAME}" != "v$V" ]; then
+            echo "::error::الوسم ${GITHUB_REF_NAME} لا يطابق VERSION في app/common.py ($V)"; exit 1
+          fi
+          grep -q "#define AppVer \"$V\"" installer/bughya.iss || { echo "::error::AppVer في bughya.iss لا يطابق $V"; exit 1; }
+          grep -q "'FileVersion', '$V'" assets/version.txt || { echo "::error::assets/version.txt لا يطابق $V"; exit 1; }
+
+      - name: تجهيز البيئة والفحص الذاتي
+        shell: cmd
+        run: |
+          python -m venv .venv
+          .venv\Scripts\python.exe -m pip install -q -r requirements.txt
+          .venv\Scripts\python.exe selftest.py
+
+      - name: بناء البرنامج
+        shell: cmd
+        run: build_exe.bat
+
+      - name: تغليف zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path dist\Bughya -DestinationPath "dist\Bughya-windows-${{ steps.ver.outputs.version }}.zip"
+
+      - name: بناء المثبِّت
+        shell: pwsh
+        run: |
+          choco install innosetup -y --no-progress
+          & "${env:ProgramFiles(x86)}\Inno Setup 6\ISCC.exe" installer\bughya.iss
+
+      - name: مجموع التحقق
+        shell: pwsh
+        run: |
+          Get-ChildItem dist\*.zip, dist\*Setup*.exe | ForEach-Object {
+            "$((Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          } | Set-Content dist\SHA256SUMS.txt
+          Get-Content dist\SHA256SUMS.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bughya-windows-${{ steps.ver.outputs.version }}
+          path: |
+            dist/*.zip
+            dist/Bughya-Setup-*.exe
+            dist/SHA256SUMS.txt
+
+      - name: نشر الإصدار
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "بُغية ${{ steps.ver.outputs.version }}" \
+            --generate-notes \
+            dist/*.zip dist/Bughya-Setup-*.exe dist/SHA256SUMS.txt
