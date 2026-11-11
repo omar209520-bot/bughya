@@ -11,6 +11,11 @@ on:
 permissions:
   contents: write
 
+# طرفيّة ويندوز تستعمل cp1252 فتنهار طباعة العربيّة في الفحص الذاتيّ
+env:
+  PYTHONUTF8: "1"
+  PYTHONIOENCODING: utf-8
+
 jobs:
   windows:
     runs-on: windows-latest
