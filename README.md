@@ -30,6 +30,6 @@
 
 ## للمطوّرين
 - التشغيل من الكود: `run.bat` (يجهّز بيئته أوّلَ مرّة). والبناء: `build_exe.bat` ثمّ ملفُّ التثبيت في `installer/bughya.iss`.
-- النشر: عدّل رقم الإصدار في `app/common.py` و`assets/version.txt` و`installer/bughya.iss`، ثمّ `git tag v<الرقم> && git push origin v<الرقم>`؛ فيبني GitHub Actions الملفّين وينشرهما (`.github/workflows/release.yml`).
+- النشر: عدّل رقم الإصدار في `app/common.py` و`assets/version.txt` و`installer/bughya.iss`، ثمّ `git tag v<الرقم> && git push origin v<الرقم>`؛ وللتجريبي أضف لاحقة: `v<الرقم>-beta1`. فيبني GitHub Actions الملفّين وينشرهما (`.github/workflows/release.yml`).
 - الفحص الذاتيّ: `.venv\Scripts\python.exe selftest.py`.
 - ما بُني وما جُرّب وما بقي: [اقرأني.md](اقرأني.md).
