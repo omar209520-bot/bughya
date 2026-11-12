@@ -320,6 +320,45 @@ def read_book(con, b, ocr) -> None:
         book.close()
 
 
+def classify_pending(con, budget: float = 20.0) -> int:
+    """قبل القراءة: أيُّ الكتب التي لم تُقرأ بعدُ مصوَّر؟ عيّنةٌ من خمس صفحاتٍ من كلّ بي دي إف: أفيها نصٌّ مضمَّن؟
+    بهذا يُقرأ النصّيُّ أوّلًا فيبحث المستخدمُ فيه في ثوانٍ، ويتأخّر المصوَّرُ إلى آخر الطابور لبطء قراءته الآليّة.
+    ولولا هذا لرُتّبت الكتبُ في أوّل قراءةٍ بحجم ملفّاتها وحدَها، إذ لا يُعرف المصوَّرُ إلّا بعد فتحه.
+    الفحصُ بميزانيّة وقتٍ (ثوانٍ) لئلّا تتأخّر القراءةُ في المكتبات الكبيرة؛ وما لم يُفحص يبقى على ترتيب الحجم.
+    ولا يُغني عن الفحص الدقيق في read_book، فهو يصحّحه حين يُفتح الكتاب."""
+    rows = con.execute("SELECT id, path FROM books WHERE state = 'pending' AND kind = 'pdf' "
+                       "AND scanned_guess = 0 ORDER BY size").fetchall()
+    if not rows:
+        return 0
+    try:
+        import pymupdf as fitz
+        from readers.pdf import MIN_LETTERS
+    except ImportError as e:
+        log("تعذّر فحصُ الكتب قبل القراءة: %r" % e)
+        return 0
+    t0, n = time.monotonic(), 0
+    for r in rows:
+        if time.monotonic() - t0 > budget or STOP.exists():
+            break
+        try:
+            with fitz.open(r["path"]) as doc:
+                total = doc.page_count
+                if not total:
+                    continue
+                idx = sorted({min(total - 1, int(total * f)) for f in (0.1, 0.3, 0.5, 0.7, 0.9)})
+                letters = sum(sum(1 for c in doc[i].get_text("text") if c.isalpha()) for i in idx)
+            scanned = letters / len(idx) < MIN_LETTERS
+        except Exception:      # ملفٌّ معطوبٌ أو مقفل: يُترك لقارئه، فهو يسجّل سببَ تعذّره
+            continue
+        if scanned:
+            con.execute("UPDATE books SET scanned_guess=1 WHERE id=?", (r["id"],))
+            n += 1
+    if n:
+        con.commit()
+        log("فحصُ ما قبل القراءة: %d كتابًا مصوَّرًا يُؤخَّر إلى آخر الطابور." % n)
+    return n
+
+
 def pid_alive(pid: int) -> bool:
     if pid <= 0:
         return False
@@ -375,8 +414,10 @@ def cmd_update(args) -> int:
         stats = sync(con)
         progress(state="running", pid=os.getpid(), started=common.now(), ocr_ok=ocr.ok, ocr_reason=ocr.reason,
                  **counts(con))
-        todo = con.execute("SELECT * FROM books WHERE state IN ('pending', 'reading') "
-                           "ORDER BY state = 'reading' DESC, scanned_guess, size").fetchall()
+        queue = ("SELECT * FROM books WHERE state IN ('pending', 'reading') "
+                 "ORDER BY state = 'reading' DESC, scanned_guess, size")
+        classify_pending(con)
+        todo = con.execute(queue).fetchall()
         first = first_ids()
         todo.sort(key=lambda b: first.index(b["id"]) if b["id"] in first else len(first))
         for b in todo:
