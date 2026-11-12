@@ -88,6 +88,12 @@ def meaningless(name: str) -> bool:
     return not any("؀" <= c <= "ۿ" for c in letters) or len(letters) < 3
 
 
+def title_key(title: str, volume) -> tuple:
+    """مفتاحُ المقابلة بين عناوين الكتب: العنوانُ مطبَّعًا مع جزئه، فلا يُظنّ الجزءُ الأوّل والثاني كتابًا واحدًا."""
+    import arabic
+    return (re.sub(r"\s+", " ", arabic.normalize(title or "")).strip(), volume or 0)
+
+
 def fingerprint(p: pathlib.Path) -> str:
     h = hashlib.sha1()
     size = p.stat().st_size
@@ -134,8 +140,11 @@ def scan_files() -> list:
 # ───────────────────────── الفحص: ما جدّ وما تغيّر وما حُذف ─────────────────────────
 
 def sync(con) -> dict:
-    stats = {"new": 0, "changed": 0, "moved": 0, "missing": 0}
+    stats = {"new": 0, "changed": 0, "moved": 0, "missing": 0, "duplicate": 0}
     files = scan_files()
+    by_title = {}
+    for r in con.execute("SELECT title, volume FROM books WHERE state != 'missing'"):
+        by_title.setdefault(title_key(r["title"], r["volume"]), r["title"])
     seen = {str(p) for _, p in files}
     # ما غاب عن موضعه يُعلَّم مفقودًا أوّلًا، ليُعرف إن ظهر في موضعٍ آخر (نُقل أو أُعيدت تسميتُه) فيُنقل إليه بنصّه
     for row in con.execute("SELECT id, path FROM books WHERE state != 'missing'").fetchall():
@@ -167,8 +176,11 @@ def sync(con) -> dict:
                 stats["moved"] += 1
                 stats["missing"] -= 1 if stats["missing"] else 0
                 continue
-            add_book(con, src, p, st, fp)
-            stats["new"] += 1
+            # الملفُّ نفسُه موجودٌ في موضعٍ آخر: نسخةٌ مكرَّرة لا تُقرأ ثانيةً (والقراءةُ الآليّة تكلّف ساعات)
+            twin = con.execute("SELECT id, title FROM books WHERE fingerprint = ? AND "
+                               "state NOT IN ('missing', 'duplicate') LIMIT 1", (fp,)).fetchone()
+            add_book(con, src, p, st, fp, twin, by_title)
+            stats["duplicate" if twin else "new"] += 1
         elif row["size"] != st.st_size or abs((row["mtime"] or 0) - st.st_mtime) > 1:
             fp = fingerprint(p)
             if fp != row["fingerprint"]:
@@ -183,26 +195,45 @@ def sync(con) -> dict:
             con.execute("UPDATE books SET state=? WHERE id=?",
                         ("done" if row["done_pages"] and row["done_pages"] >= (row["pages"] or 0) else "pending",
                          row["id"]))
+    # ذهب أصلُ النسخة المكرَّرة (حُذف أو أُخرج): تُرفع هي مكانَه وتُقرأ
+    for r in con.execute("SELECT id, dup_of FROM books WHERE state = 'duplicate'").fetchall():
+        orig = con.execute("SELECT state FROM books WHERE id = ?", (r["dup_of"],)).fetchone() if r["dup_of"] else None
+        if orig is None or orig["state"] == "missing":
+            con.execute("UPDATE books SET state='pending', dup_of=NULL, hints=NULL, updated=? WHERE id=?",
+                        (common.now(), r["id"]))
     con.commit()
     return stats
 
 
-def add_book(con, src, p: pathlib.Path, st, fp: str) -> None:
+def add_book(con, src, p: pathlib.Path, st, fp: str, twin=None, by_title: dict = None) -> int:
+    """يسجّل كتابًا جديدًا. twin: كتابٌ ملفُّه هو هذا الملفُّ نفسُه (البصمةُ واحدة) فهذا نسخةٌ مكرَّرة لا تُقرأ.
+    by_title: مؤشّرُ العناوين لتنبيهٍ ظنّيٍّ إن وُجد كتابٌ بعنوانه وجزئه، وهو تنبيهٌ لا يمنع القراءة."""
     ext = p.suffix.lower()
     kind = KINDS.get(ext)
     stem = p.stem
     vol = parse_volume(stem)
     title = clean_stem(vol[0]) if vol and vol[0] else clean_stem(stem)
-    state, error, scanned = "pending", None, 0
+    state, error, scanned, hints = "pending", None, 0, {}
     if kind is None:
         state, error = "unsupported", UNSUPPORTED_HINT.get(ext, "صيغةٌ لا تُقرأ هنا")
     elif kind == "image":
         scanned = 1
+    if twin:
+        state = "duplicate"
+        hints["dup"] = "نسخةٌ مكرَّرة: ملفُّه هو ملفُّ «%s» نفسُه، فلم يُقرأ ثانيةً." % (twin["title"] or "كتابٍ عندك")
+    elif by_title is not None:
+        other = by_title.get(title_key(title, vol[1] if vol else None))
+        if other:
+            hints["similar"] = "يشبه عنوانُه «%s» عندك؛ فانظر: أهما كتابٌ واحد؟" % other
     con.execute("INSERT INTO books(path, source, kind, size, mtime, fingerprint, title, title_source, series, volume, "
-                "state, error, scanned_guess, added, updated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "state, error, scanned_guess, hints, dup_of, added, updated) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (str(p), str(src), kind or ext.lstrip("."), st.st_size, st.st_mtime, fp, title, "filename",
                  clean_stem(vol[0]) if vol else None, vol[1] if vol else None, state, error, scanned,
+                 json.dumps(hints, ensure_ascii=False) if hints else None, twin["id"] if twin else None,
                  common.now(), common.now()))
+    if by_title is not None:
+        by_title.setdefault(title_key(title, vol[1] if vol else None), title)
+    return con.execute("SELECT last_insert_rowid()").fetchone()[0]
 
 
 # ───────────────────────── القراءة ─────────────────────────
@@ -240,7 +271,7 @@ def progress(**kw) -> None:
 
 def counts(con) -> dict:
     c = {r[0]: r[1] for r in con.execute("SELECT state, COUNT(*) FROM books GROUP BY state")}
-    total = sum(v for k, v in c.items() if k not in ("missing",))
+    total = sum(v for k, v in c.items() if k not in ("missing", "duplicate"))
     return {"books_total": total, "books_done": c.get("done", 0) + c.get("empty", 0),
             "pending": c.get("pending", 0) + c.get("reading", 0)}
 

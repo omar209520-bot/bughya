@@ -75,7 +75,8 @@ def connect(readonly: bool = False) -> sqlite3.Connection:
 def _migrate(con) -> None:
     """أعمدةٌ أُضيفت بعد إنشاء المخزن تُضاف إليه، فلا يلزم إعادةُ قراءة الكتب."""
     want = {"books": [("hints", "TEXT"), ("approx", "INTEGER DEFAULT 0"), ("scanned_guess", "INTEGER DEFAULT 0"),
-                      ("btype", "TEXT"), ("btype_auto", "TEXT")],
+                      ("btype", "TEXT"), ("btype_auto", "TEXT"),
+                      ("dup_of", "INTEGER")],
             "pages": [("vol", "INTEGER"), ("catch", "TEXT")]}
     for table, cols in want.items():
         have = {r[1] for r in con.execute("PRAGMA table_info(%s)" % table)}
