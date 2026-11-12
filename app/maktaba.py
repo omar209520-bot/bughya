@@ -245,7 +245,9 @@ def counts(con) -> dict:
             "pending": c.get("pending", 0) + c.get("reading", 0)}
 
 
-def read_book(con, b, ocr) -> None:
+def read_book(con, b, ocr, defer: bool = False):
+    """يقرأ كتابًا ويحفظ صفحاتِه. ومع defer: إن تبيّن عند فتحه أنّ نصّه المضمَّن معيبٌ فستُقرأ صفحاتُه كلُّها
+    قراءةً آليّة (وهي بطيئة)، أُجّل إلى آخر الطابور وأُعيد «defer» ليُقرأ النصّيُّ السليمُ أوّلًا."""
     path = pathlib.Path(b["path"])
     try:
         book = open_book(path, ocr)
@@ -260,6 +262,12 @@ def read_book(con, b, ocr) -> None:
         con.commit()
         log("✗ %s: %r" % (path.name, e))
         return
+    if defer and b["state"] != "reading" and getattr(book, "force_ocr", False):
+        con.execute("UPDATE books SET scanned_guess=1, updated=? WHERE id=?", (common.now(), b["id"]))
+        con.commit()
+        book.close()
+        log("↩ %s: نصُّ الملفّ معيبٌ فتُقرأ صفحاتُه آليًّا، وأُخّر إلى آخر الطابور." % path.name)
+        return "defer"
     try:
         fresh = b["state"] != "reading"
         if fresh:
@@ -420,10 +428,21 @@ def cmd_update(args) -> int:
         todo = con.execute(queue).fetchall()
         first = first_ids()
         todo.sort(key=lambda b: first.index(b["id"]) if b["id"] in first else len(first))
+        late = []        # ما تبيّن عند فتحه أنّه يُقرأ آليًّا كلُّه: يُقرأ بعد الكتب النصّيّة
         for b in todo:
             if STOP.exists():
                 break
             if store.book(con, b["id"]) is None:  # أُخرج أثناء القراءة
+                continue
+            if read_book(con, b, ocr, defer=True) == "defer":
+                late.append(b["id"])
+                continue
+            progress(**counts(con))
+        for bid in late:
+            if STOP.exists():
+                break
+            b = store.book(con, bid)
+            if b is None:
                 continue
             read_book(con, b, ocr)
             progress(**counts(con))
