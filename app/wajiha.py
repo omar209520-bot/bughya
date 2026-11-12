@@ -1219,7 +1219,7 @@ header .ver button{width:24px;height:24px;border-radius:50%;border:1.5px solid v
 <button class="btn2" id="pvprev">‹ السابقة</button><input type="number" id="pvgo" min="1" style="width:70px;font-size:15px;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg)" title="رقمُ الصفحة ثمّ Enter"><span class="muted" id="pvtot"></span><button class="btn2" id="pvnext">التالية ›</button>
 <button class="btn2" id="pvimg">صورةُ الصفحة</button><button class="btn2" id="pvcopy">انسخ المحدَّد مع عزوه</button><button class="btn2" id="pvadd">+ أضف المحدَّد إلى المسودة</button><button class="btn2" id="pvsearch">ابحث في هذا الكتاب</button>
 <button class="btn2" id="pvflow" title="العرضُ وحده يتغيّر، لا نصُّ الكتاب"></button><button class="btn2" id="pvcover">اجعلها غلاف الكتاب</button><button class="btn2" id="pvren">بيانات الكتاب</button><button class="btn2" id="pvclose">إغلاق ✕</button></div>
-<div class="two one" id="pvtwo"><aside id="pvtoc" style="display:none"></aside><div><div class="head" id="pvhead"></div><div class="txt" id="pvbody"></div><div class="foot" id="pvfoot"></div><div class="note" id="pvnote"></div><div id="pvayat"></div></div>
+<div class="two one" id="pvtwo"><aside id="pvtoc" style="display:none"></aside><div><div class="head" id="pvhead"></div><div class="note" id="pvnote"></div><div class="txt" id="pvbody"></div><div class="foot" id="pvfoot"></div><div id="pvayat"></div></div>
 <div id="pvimgw" style="display:none"></div></div></div></div>
 <div id="ren" role="dialog" aria-modal="true" aria-label="بيانات الكتاب"><div class="abox">
 <b style="font:700 22px var(--text)">بياناتُ الكتاب</b> <span class="muted" id="renid"></span>
@@ -1385,13 +1385,14 @@ async function drawWords(p){
   PVW=r;let doubts=0;
   const render=lines=>{const sp=lineSeps(lines.map(l=>l.map(w=>w.t).join(' ')));
     return lines.map((l,i)=>l.map(w=>{if(w.d)doubts++;
-    return '<span class="wd'+(w.d?' dq':'')+'"'+(w.b?' data-b="'+w.b.join(',')+'"':'')+'>'+esc(w.t)+'</span>'}).join(' ')+(i<lines.length-1?sp[i]:'')).join('')};
+    return '<span class="wd'+(w.d?' dq" title="ليست في قاموس كتبك، فقد تكون خطأً في القراءة الآلية: قابلها بالصورة':'')+'"'+(w.b?' data-b="'+w.b.join(',')+'"':'')+'>'+esc(w.t)+'</span>'}).join(' ')+(i<lines.length-1?sp[i]:'')).join('')};
   $('#pvbody').innerHTML=render(r.body||[]);
   if(r.foot&&r.foot.length&&p.foot)$('#pvfoot').innerHTML='<b>الحاشية:</b>\n'+render(r.foot);
   document.querySelectorAll('#pv .wd[data-b]').forEach(s=>s.onclick=()=>showWord(s));
   const n=document.createElement('div');n.className='note';
-  n.textContent=r.lexicon?('اضغط أي كلمة لترى موضعها في الصورة. والمعلَّمة ('+AR(doubts)+') غير معروفة في قاموس كتبك، فراجعها؛ وغير المعلَّمة قد تكون خاطئة أيضًا.')
-    :'اضغط أي كلمة لترى موضعها في الصورة. (تعليم الكلمات المشكوك فيها يحتاج كتبًا نصيّة أكثر في مكتبتك.)';
+  n.textContent=!r.lexicon?'اضغط أي كلمة لترى موضعها في الصورة. (تعليم الكلمات المشكوك فيها يحتاج كتبًا نصيّة أكثر في مكتبتك.)'
+    :doubts?('اضغط أي كلمة لترى موضعها في الصورة. و'+AR(doubts)+' كلمةً تحتها خطٌّ متموّجٌ برتقاليّ، وتُؤطَّر في الصورة: ليست في قاموس كتبك، فقد تكون خطأً في القراءة الآلية، فقابلها بالصورة قبل نقلها. وما لا خطَّ تحته قد يكون خاطئًا أيضًا.')
+    :'اضغط أي كلمة لترى موضعها في الصورة. ولم تُعلَّم كلمةٌ في هذه الصفحة: كلُّها في قاموس كتبك، وهذا لا يعني أنّها كلَّها صواب.';
   $('#pvnote').appendChild(n);
   drawImgBoxes();
 }
