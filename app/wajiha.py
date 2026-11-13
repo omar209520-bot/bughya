@@ -1219,7 +1219,7 @@ header .ver button{width:24px;height:24px;border-radius:50%;border:1.5px solid v
 <button class="btn2" id="pvprev">‹ السابقة</button><input type="number" id="pvgo" min="1" style="width:70px;font-size:15px;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg)" title="رقمُ الصفحة ثمّ Enter"><span class="muted" id="pvtot"></span><button class="btn2" id="pvnext">التالية ›</button>
 <button class="btn2" id="pvimg">صورةُ الصفحة</button><button class="btn2" id="pvcopy">انسخ المحدَّد مع عزوه</button><button class="btn2" id="pvadd">+ أضف المحدَّد إلى المسودة</button><button class="btn2" id="pvsearch">ابحث في هذا الكتاب</button>
 <button class="btn2" id="pvflow" title="العرضُ وحده يتغيّر، لا نصُّ الكتاب"></button><button class="btn2" id="pvcover">اجعلها غلاف الكتاب</button><button class="btn2" id="pvren">بيانات الكتاب</button><button class="btn2" id="pvclose">إغلاق ✕</button></div>
-<div class="two one" id="pvtwo"><aside id="pvtoc" style="display:none"></aside><div><div class="head" id="pvhead"></div><div class="txt" id="pvbody"></div><div class="foot" id="pvfoot"></div><div class="note" id="pvnote"></div><div id="pvayat"></div></div>
+<div class="two one" id="pvtwo"><aside id="pvtoc" style="display:none"></aside><div><div class="head" id="pvhead"></div><div class="note" id="pvnote"></div><div class="txt" id="pvbody"></div><div class="foot" id="pvfoot"></div><div id="pvayat"></div></div>
 <div id="pvimgw" style="display:none"></div></div></div></div>
 <div id="ren" role="dialog" aria-modal="true" aria-label="بيانات الكتاب"><div class="abox">
 <b style="font:700 22px var(--text)">بياناتُ الكتاب</b> <span class="muted" id="renid"></span>
@@ -1385,13 +1385,14 @@ async function drawWords(p){
   PVW=r;let doubts=0;
   const render=lines=>{const sp=lineSeps(lines.map(l=>l.map(w=>w.t).join(' ')));
     return lines.map((l,i)=>l.map(w=>{if(w.d)doubts++;
-    return '<span class="wd'+(w.d?' dq':'')+'"'+(w.b?' data-b="'+w.b.join(',')+'"':'')+'>'+esc(w.t)+'</span>'}).join(' ')+(i<lines.length-1?sp[i]:'')).join('')};
+    return '<span class="wd'+(w.d?' dq" title="ليست في قاموس كتبك، فقد تكون خطأً في القراءة الآلية: قابلها بالصورة':'')+'"'+(w.b?' data-b="'+w.b.join(',')+'"':'')+'>'+esc(w.t)+'</span>'}).join(' ')+(i<lines.length-1?sp[i]:'')).join('')};
   $('#pvbody').innerHTML=render(r.body||[]);
   if(r.foot&&r.foot.length&&p.foot)$('#pvfoot').innerHTML='<b>الحاشية:</b>\n'+render(r.foot);
   document.querySelectorAll('#pv .wd[data-b]').forEach(s=>s.onclick=()=>showWord(s));
   const n=document.createElement('div');n.className='note';
-  n.textContent=r.lexicon?('اضغط أي كلمة لترى موضعها في الصورة. والمعلَّمة ('+AR(doubts)+') غير معروفة في قاموس كتبك، فراجعها؛ وغير المعلَّمة قد تكون خاطئة أيضًا.')
-    :'اضغط أي كلمة لترى موضعها في الصورة. (تعليم الكلمات المشكوك فيها يحتاج كتبًا نصيّة أكثر في مكتبتك.)';
+  n.textContent=!r.lexicon?'اضغط أي كلمة لترى موضعها في الصورة. (تعليم الكلمات المشكوك فيها يحتاج كتبًا نصيّة أكثر في مكتبتك.)'
+    :doubts?('اضغط أي كلمة لترى موضعها في الصورة. و'+AR(doubts)+' كلمةً تحتها خطٌّ متموّجٌ برتقاليّ، وتُؤطَّر في الصورة: ليست في قاموس كتبك، فقد تكون خطأً في القراءة الآلية، فقابلها بالصورة قبل نقلها. وما لا خطَّ تحته قد يكون خاطئًا أيضًا.')
+    :'اضغط أي كلمة لترى موضعها في الصورة. ولم تُعلَّم كلمةٌ في هذه الصفحة: كلُّها في قاموس كتبك، وهذا لا يعني أنّها كلَّها صواب.';
   $('#pvnote').appendChild(n);
   drawImgBoxes();
 }
@@ -1736,20 +1737,22 @@ $('#gmeasure').onclick=async()=>{const t=$('#gterms').value.trim();if(!t)return;
 
 // ── الكتب
 let BOOKS=null;
-const STATE={done:'قُرئ',reading:'يُقرأ',pending:'ينتظر',error:'تعذّر',unsupported:'لا يُقرأ',empty:'لا نصّ',missing:'مفقود'};
+const STATE={done:'قُرئ',reading:'يُقرأ',pending:'ينتظر',error:'تعذّر',unsupported:'لا يُقرأ',empty:'لا نصّ',missing:'مفقود',duplicate:'مكرَّر'};
 async function loadBooks(){$('#btab').innerHTML='<div class="wait">تُحمَّل الكتب…</div>';BOOKS=await api('/api/books');
   if(BOOKS.error){$('#btab').innerHTML='<div class="err">'+esc(BOOKS.error)+'</div>';BOOKS=null;return}drawBooks()}
 function how(b){
-  if(!b.done_pages)return '';const sh=(b.ocr_pages||0)/b.done_pages;
-  let h=sh>0.9?'<span class="tag ocr">قراءة آلية</span>':sh>0.05?'<span class="tag ocr">قراءة مختلطة</span>':'<span class="tag">نص الملف</span>';
-  try{const n=b.hints&&JSON.parse(b.hints).note;if(n)h+='<div style="font-size:12px;margin-top:3px">'+esc(n)+'</div>'}catch(e){}
+  let h='';
+  if(b.done_pages){const sh=(b.ocr_pages||0)/b.done_pages;
+    h=sh>0.9?'<span class="tag ocr">قراءة آلية</span>':sh>0.05?'<span class="tag ocr">قراءة مختلطة</span>':'<span class="tag">نص الملف</span>'}
+  try{const x=b.hints&&JSON.parse(b.hints);           // المكرَّرُ والمشابهُ يظهران وإن لم تُقرأ صفحة
+    if(x)for(const k of ['dup','similar','note'])if(x[k])h+='<div style="font-size:12px;margin-top:3px">'+esc(x[k])+'</div>'}catch(e){}
   return h}
 const BT={modern_print:'طبعة حديثة',old_print:'طبعة قديمة',lithograph:'طبعة حجرية',manuscript:'مخطوط'};
 const OLD=['old_print','lithograph','manuscript'];
 function btOptions(b){const cur=b.btype||'auto';
   return '<option value="auto"'+(cur=='auto'?' selected':'')+'>'+(b.btype_auto?'تلقائي: '+BT[b.btype_auto]:'النوع: لم يُحدَّد')+'</option>'+
    Object.entries(BT).map(([k,v])=>'<option value="'+k+'"'+(cur==k?' selected':'')+'>'+v+'</option>').join('')}
-function coverKind(b){if(['error','unsupported','empty','missing'].includes(b.state))return 'bad';if(!b.done_pages)return 'wait';return (b.ocr_pages||0)/b.done_pages>0.05?'ocr':''}
+function coverKind(b){if(['error','unsupported','empty','missing','duplicate'].includes(b.state))return 'bad';if(!b.done_pages)return 'wait';return (b.ocr_pages||0)/b.done_pages>0.05?'ocr':''}
 function bookTitle(b){return (b.series||b.title||'')+(b.volume?' ج'+AR(b.volume):'')}
 // الأصناف: صنفٌ واحدٌ لكلّ كتاب، والقائمةُ في categories.json
 let CATS=[],BCAT='',COVV={};
@@ -1777,7 +1780,7 @@ function drawBooks(){
     (!BCAT||(BCAT=='-'?!b.fann:b.fann==BCAT)));
   $('#bcount').textContent=AR(list.length)+' من '+AR(BOOKS.length);
   if(!BOOKS.length){$('#btab').innerHTML='<div class="wait">لا كتب بعد. <span class="lnk" id="goadd">أضف كتبك</span> لتبدأ.</div>';$('#goadd').onclick=()=>show('welcome');return}
-  $('#btab').innerHTML=list.map(b=>{const part=b.pages&&b.pages!=b.done_pages,img=b.cover&&b.done_pages&&!['error','unsupported','missing'].includes(b.state);
+  $('#btab').innerHTML=list.map(b=>{const part=b.pages&&b.pages!=b.done_pages,img=b.cover&&b.done_pages&&!['error','unsupported','missing','duplicate'].includes(b.state);
     const name=b.unclear?'<span class="fname">'+esc(bookTitle(b))+'</span>':esc(bookTitle(b));
     return '<div class="vol"><button class="cover '+coverKind(b)+(img?' img':'')+'" title="افتح الكتاب: صورة الصفحة بجانب النص المستخرج" data-rd="'+b.id+'" data-t="'+esc(bookTitle(b))+'">'+
     (img?'<img src="/cover/'+b.id+'.png?v='+(COVV[b.id]||0)+'" alt="" loading="lazy" onerror="coverFail(this)">':

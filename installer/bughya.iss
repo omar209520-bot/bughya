@@ -3,7 +3,7 @@
 ; التنصيبُ للمستخدم وحده بلا صلاحيّات مدير، في %LOCALAPPDATA%\Programs\Bughya.
 ; بياناتُ المستخدم (الكتب المقروءة والإعدادات) في %LOCALAPPDATA%\Bughya ولا يمسّها الحذف.
 
-#define AppVer "0.9.3"
+#define AppVer "0.9.4"
 
 [Setup]
 AppId={{6B1F3C2E-8E1A-4D5B-9C1F-B06A0A9E2F11}

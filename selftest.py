@@ -85,6 +85,22 @@ def main() -> int:
         report(all(v == "done" for v in states.values()) and len(states) == 5,
                "قراءةُ الصيغ (نصٌّ بترميزين، ووورد، وويب، وبي دي إف)", str(states))
 
+        # تكرارُ الكتاب: الملفُّ نفسُه في موضعٍ آخر نسخةٌ مكرَّرة لا تُقرأ، والعنوانُ نفسُه بملفٍّ آخر تنبيهٌ ظنّيّ
+        import json
+        import shutil
+        nus = books / "نسخ"
+        nus.mkdir()
+        shutil.copy(books / "ملف وورد.docx", nus / "ملف وورد - نسخة.docx")      # الملفُّ نفسُه
+        make_docx(nus / "ملف وورد.docx", [("نصٌّ آخرُ في ملفٍّ عنوانُه كعنوانه", None)])   # العنوانُ نفسُه
+        maktaba.sync(con)
+        dup = con.execute("SELECT state, hints FROM books WHERE path LIKE '%- نسخة%'").fetchone()
+        report(bool(dup) and dup["state"] == "duplicate" and "dup" in json.loads(dup["hints"] or "{}"),
+               "النسخةُ المكرَّرة لا تُقرأ ثانيةً", str(dict(dup) if dup else None))
+        sim = con.execute("SELECT state, hints FROM books WHERE path LIKE '%نسخ%' AND path NOT LIKE '%- نسخة%'"
+                          ).fetchone()
+        report(bool(sim) and sim["state"] == "pending" and "similar" in json.loads(sim["hints"] or "{}"),
+               "المشابهُ عنوانُه يُنبَّه عليه ولا يُمنع من القراءة", str(dict(sim) if sim else None))
+
         import bahth
         expr, seqs = bahth.build("phrase", bahth.query_tokens("الماء طهور"), False, False)
         hits = bahth.search(con, expr, seqs, False)
