@@ -28,3 +28,10 @@
 ```
 .venv\Scripts\python.exe tests\measure.py --diff baseline
 ```
+
+وقياس تعليم الكلمات المشكوك فيها (القاموس وحده، والقاموس مع السياق) بعد بناء القاموس:
+
+```
+.venv\Scripts\python.exe app\maktaba.py lexicon
+.venv\Scripts\python.exe tests\measure_marks.py --save اسم
+```
