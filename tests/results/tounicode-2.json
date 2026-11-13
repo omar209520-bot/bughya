@@ -1,0 +1,112 @@
+{
+ "date": "2026-11-13 17:04",
+ "pages": [
+  {
+   "id": "01",
+   "kind": "بي دي إف من وورد، نصه المضمَّن معيب، حواشٍ",
+   "category": "modern_print",
+   "method": "ocr (نص الملف معيب)",
+   "cer": 0.0096,
+   "wer": 0.0395,
+   "words": 228
+  },
+  {
+   "id": "02",
+   "kind": "النص المعيب نفسه، آيات مشكولة",
+   "category": "modern_print",
+   "method": "ocr (نص الملف معيب)",
+   "cer": 0.019,
+   "wer": 0.0814,
+   "words": 295
+  },
+  {
+   "id": "03",
+   "kind": "نص مضمَّن معيب، آيات",
+   "category": "modern_print",
+   "method": "ocr (نص الملف معيب)",
+   "cer": 0.0216,
+   "wer": 0.0872,
+   "words": 390
+  },
+  {
+   "id": "04",
+   "kind": "نص مضمَّن سليم",
+   "category": "modern_print",
+   "method": "text",
+   "cer": 0.0025,
+   "wer": 0.0195,
+   "words": 359
+  },
+  {
+   "id": "05",
+   "kind": "نص مضمَّن سليم",
+   "category": "modern_print",
+   "method": "text",
+   "cer": 0.0175,
+   "wer": 0.0548,
+   "words": 310
+  },
+  {
+   "id": "06",
+   "kind": "مصوَّر حديث",
+   "category": "modern_print",
+   "method": "ocr",
+   "cer": 0.0776,
+   "wer": 0.25,
+   "words": 68
+  },
+  {
+   "id": "07",
+   "kind": "مصوَّر طباعة قديمة",
+   "category": "old_print",
+   "method": "ocr",
+   "cer": 0.1351,
+   "wer": 0.4098,
+   "words": 183
+  },
+  {
+   "id": "08",
+   "kind": "مصوَّر بحواشي محقق",
+   "category": "modern_print",
+   "method": "ocr",
+   "cer": 0.0259,
+   "wer": 0.0751,
+   "words": 293
+  },
+  {
+   "id": "09",
+   "kind": "مصوَّر",
+   "category": "old_print",
+   "method": "ocr",
+   "cer": 0.1762,
+   "wer": 0.6125,
+   "words": 240
+  },
+  {
+   "id": "10",
+   "kind": "نص مضمَّن",
+   "category": "modern_print",
+   "method": "text",
+   "cer": 0.0,
+   "wer": 0.0,
+   "words": 207
+  }
+ ],
+ "total": {
+  "cer": 0.0393,
+  "wer": 0.1368,
+  "words": 2573,
+  "categories": {
+   "modern_print": {
+    "cer": 0.0164,
+    "wer": 0.0605,
+    "pages": 8
+   },
+   "old_print": {
+    "cer": 0.1584,
+    "wer": 0.5248,
+    "pages": 2
+   }
+  }
+ }
+}

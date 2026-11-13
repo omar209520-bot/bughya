@@ -177,6 +177,47 @@ def main() -> int:
         report(layout.split_page(page)["catch"] is None, "آخرُ فقرةٍ قصيرٌ على اليمين لا يُعدّ تعقيبة")
         from readers.pdf import fix_allah
         report(fix_allah("اذكروا اللَ ذكرا والل أعلم الليل وال") == "اذكروا اللَه ذكرا والله أعلم الليل وال", "لفظُ الجلالة الناقصُ في ملفّات وورد يُردّ، ولا يمسّ غيرَه")
+        # خريطةُ الحروف في ملفّات وورد: السليمةُ لا تُمسّ ولو كان في وسط ترتيبها رموزٌ دخيلة، والمعيبةُ تُصلَح عيوبُها وحدها
+        import unicodedata
+        from readers import tounicode
+        sound = {100 + i: unicodedata.normalize("NFKC", chr(c)) for i, c in enumerate(range(0xFE80, 0xFEFD))}
+
+        def intruded(mp, pos, n, text="A"):       # n رمزًا دخيلًا عند الموضع pos، وما بعدها يتأخّر
+            ks, o = sorted(mp), {}
+            for i, g in enumerate(ks):
+                o[g if i < pos else g + n] = mp[g]
+            for j in range(n):
+                o[ks[pos] + j] = text
+            return o
+
+        def broken(mp):                           # عيوبُ وورد: حرفٌ بدل حرف، ومسافةٌ بدل حرف
+            o, truth = dict(mp), {}
+            for i, g in enumerate(sorted(mp)):
+                if len(mp[g]) == 1 and i % 9 in (3, 7):
+                    truth[g], o[g] = mp[g], ("ط" if i % 9 == 3 and mp[g] != "ط" else " ")
+            return o, truth
+
+        report(tounicode.fixes(sound) == {}, "خريطةُ الحروف السليمة لا تُمسّ")
+        touched = {(n, t): len(tounicode.fixes(intruded(sound, 60, n, t))) for n in (1, 2, 3, 4, 6) for t in ("A", " ", "،")}
+        report(not any(touched.values()), "السليمةُ التي في وسطها رموزٌ دخيلة (١ و٢ و٣ و٤ و٦) لا تُمسّ",
+               str({k: v for k, v in touched.items() if v}))
+        every = sum(1 for n in range(1, 8) for p in range(1, 124) if tounicode.fixes(intruded(sound, p, n)))
+        report(every == 0, "ولا تُمسّ والدخيلُ في أيّ موضعٍ من الترتيب", "مُسّت %d خريطة" % every)
+        bad, truth = broken(sound)
+        fx = tounicode.fixes(bad)
+        report(fx == truth, "الخريطةُ المعيبة تُصلَح (حرفٌ بدل حرف، ومسافةٌ بدل حرف)",
+               "أُصلح %d من %d، وخطأً %d" % (sum(1 for g in truth if fx.get(g) == truth[g]), len(truth),
+                                            sum(1 for g in fx if fx[g] != truth.get(g))))
+        worst = []
+        for n in (1, 2, 3, 4, 6):
+            bad, truth = broken(intruded(sound, 60, n))
+            fx = tounicode.fixes(bad)
+            wrong = sum(1 for g in fx if fx[g] != truth.get(g))
+            if wrong or sum(1 for g in truth if fx.get(g) == truth[g]) < 0.8 * len(truth):
+                worst.append((n, len(fx), len(truth), wrong))
+        report(not worst, "المعيبةُ التي فيها رموزٌ دخيلة تُصلَح عيوبُها وحدها", str(worst))
+        cm = "1 beginbfchar\n<0003> <0020>\nendbfchar\n1 beginbfrange\n<00A0> <00A2> <0621>\nendbfrange"
+        report(tounicode.parse(cm) == {3: " ", 160: "ء", 161: "آ", 162: "أ"}, "قراءةُ خريطة الحروف من الملفّ")
         x = TMP / "t.xlsx"
         tadqiq.to_xlsx(res["items"], x, "فصل.docx", res["coverage"])
         report(x.is_file() and x.stat().st_size > 1000, "تصديرُ نتيجة التدقيق إلى إكسل")

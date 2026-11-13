@@ -9,6 +9,11 @@
 فما شذّ عن الخطّ وجاراه القريبان عليه، يُردّ إليه. ولا يُمسّ رمزٌ ليس بين جارين يشهدان للإزاحة نفسها، ولا ما لا
 يقع على حرفٍ عربيّ.
 
+والخطُّ السليم قد ينقطع ترتيبُه (رموزٌ دخيلة في وسطه، أو حروفٌ ساقطة منه): فهو ترتيبان سليمان لا ترتيبٌ واحدٌ معيب.
+وقع ذلك في خطوطٍ حقيقيّة (SimplifiedArabic وadwa-assalaf وAAAGoldenLotus)، وكانت الصيغةُ الأولى تبدّل فيها حروفًا
+سليمة (ث←خ، ط←ظ، ي←ج). فالقاعدةُ في fixes: عند الشكّ لا يُصلَح شيء. وما تتركه بلا إصلاح يبقى على حاله قبل هذا
+الملفّ: نصٌّ معيبٌ يُقرأ آليًّا.
+
 التعديلُ في الذاكرة وحدها: الملفُّ على القرص لا يُكتب. وبعده يُقابَل النصُّ بالصورة كما كان (pdf._text_layer_score)،
 فإن بقي معيبًا قُرئ آليًّا كما كان.
 """
@@ -17,6 +22,8 @@ import unicodedata
 
 MIN_SUPPORT = 8        # إزاحةٌ يشهد لها هذا العددُ من الرموز فأكثر تُعدّ ترتيبًا للخطّ
 WINDOW = 4             # أبعدُ جارٍ شاهدٍ عن الرمز المُصلَح
+CHAIN = 4              # سلسلةٌ متّصلةٌ من الشهود بهذا الطول فأكثر لا تكون عَرَضًا (العَرَضيّةُ ثلاثةٌ على الأكثر)
+EXCL = 3               # شهودٌ للإزاحة المجاورة ليسوا من شهود الأقوى بهذا العدد فأكثر: ترتيبٌ ثانٍ لا ظلّ
 _HEX = "[0-9A-Fa-f]"
 
 # لكلّ حرفٍ عربيّ: أرقامُ صور عرضه (المنفردة والمتطرّفة والمبتدأة والمتوسّطة)
@@ -64,45 +71,136 @@ def parse(cmap: str) -> dict:
     return m
 
 
+def _chains(ws: set, present: list) -> dict:
+    """لكلّ شاهد: طولُ سلسلته، وهي الشهودُ المتوالون في الخريطة بلا رمزٍ بينهم يخالف، ولا فجوةٍ أوسعَ من WINDOW."""
+    out, run, last = {}, [], None
+    for g in present:
+        if g in ws and (not run or g - last <= WINDOW):
+            run.append(g)
+        else:
+            for x in run:
+                out[x] = len(run)
+            run = [g] if g in ws else []
+        last = g
+    for x in run:
+        out[x] = len(run)
+    return out
+
+
 def fixes(m: dict) -> dict:
-    """ما يُصلَح من الخريطة: {رقم الرمز: الحرف الصحيح}."""
-    codes = {}                      # لكلّ رمز: الأرقامُ التي يصحّ أن يقع عليها بحسب حرفه المسجَّل
+    """ما يُصلَح من الخريطة: {رقم الرمز: الحرف الصحيح}.
+
+    الإزاحةُ المجاورة للصحيحة (±١…٣) يشهد لها بعضُ صور الحرف الواحد عَرَضًا، وشهودُها كلُّهم من شهود الصحيحة: فهي
+    ظلٌّ لها يُطرح. وإن كان للمجاورة شهودٌ ليسوا للأقوى (EXCL فأكثر) فهما ترتيبان حقيقيّان متنازعان: خطٌّ في وسطه
+    رموزٌ دخيلة، ما قبلها ترتيبٌ سليم وما بعدها ترتيبٌ سليم، لا ترتيبٌ واحدٌ معيبٌ ذيلُه. فيُقسم الشهودُ بينهما
+    بالسلاسل المتّصلة: كلُّ رمزٍ للترتيب الذي سلسلتُه فيه أطول، ولا يُصلِح المتنازعُ شيئًا إلّا بسلسلةٍ طولُها CHAIN.
+    ولا يُصلَح:
+      - رمزٌ يشهد لترتيبٍ آخر (حرفُه المسجَّل صحيحٌ هناك)؛
+      - ولا رمزٌ يصير بالإصلاح حرفًا له رمزُه في الخطّ، أو استوفت جاراتُه صورَه (الحرفُ لا يتكرّر في الترتيب:
+        فهذا دخيلٌ عند ملتقى ترتيبين)؛
+      - ولا رمزٌ ليس بين شاهدين للترتيب نفسه، إلّا عند طرف الترتيب إن لم يكن حرفُه المسجَّل على نسق جاره.
+    وعند الشكّ لا يُصلَح شيء: القراءةُ الآليّة كما كانت خيرٌ من نصٍّ مبدَّل الحروف."""
+    codes, reg = {}, {}             # لكلّ رمز: الأرقامُ التي يصحّ أن يقع عليها بحسب حرفه المسجَّل، وحرفُه
     for g, s in m.items():
-        if len(s) == 1 and _letter(ord(s)) == s:
-            codes[g] = {ord(s), *_FORMS.get(s, ())}
+        if len(s) == 1 and _letter(ord(s)):
+            reg[g] = _letter(ord(s))
+            codes[g] = {ord(reg[g]), *_FORMS.get(reg[g], ())} if 0x0600 <= ord(s) <= 0x06FF else {ord(s)}
         elif s in _FORMS:
             codes[g] = set(_FORMS[s])
     support = {}
     for g, cs in codes.items():
         for c in cs:
             support.setdefault(c - g, set()).add(g)
-    out, settled, taken = {}, set(), []
-    # الأقوى شهادةً أوّلًا. والإزاحةُ المجاورة للصحيحة (±١…٣) يشهد لها بعضُ رموز الحرف الواحد عَرَضًا،
-    # فلا تُقبل إزاحةٌ إلّا بشهودٍ لم تستوفهم إزاحةٌ أقوى، ولا يُمسّ رمزٌ شهد لإزاحةٍ مقبولة.
-    for k, gs in sorted(support.items(), key=lambda kv: -len(kv[1])):
-        own = gs - settled
-        if len(own) < MIN_SUPPORT or any(abs(k - t) <= 3 for t in taken):
+    # حرفٌ عربيٌّ من غير الثمانية والعشرين (ی ک گ… وصورُها) مسجَّلٌ على وجهه: لا يُمسّ
+    alien = {g for g, s in m.items() if len(s) == 1 and g not in reg and unicodedata.category(s) == "Lo"
+             and ("\u0600" <= s <= "\u06ff" or "\u0750" <= s <= "\u077f" or "\ufb50" <= s <= "\ufdff"
+                  or "\ufe70" <= s <= "\ufeff")}
+    cand, tied, shadows = [], set(), []     # الأقوى شهادةً أوّلًا، وتُطرح ظلالُه
+    for k, gs in sorted(support.items(), key=lambda kv: (-len(kv[1]), kv[0])):
+        if len(gs) < MIN_SUPPORT:
+            break
+        over = [t for t in cand if abs(k - t) <= 3 and len(gs - support[t]) < EXCL]
+        if not over:
+            cand.append(k)
+        else:
+            shadows.append(k)
+        tied.update(t for t in over if len(support[t]) == len(gs))     # ظلٌّ بقوّة أصله: لا يُدرى أيُّهما الترتيب
+    cand = [k for k in cand if k not in tied]
+    rivals = {k for k in cand if any(t != k and abs(k - t) <= 3 for t in cand)}
+    # المسافةُ المسجَّلة علامةُ وورد لما جهله، فلا تشهد ولا تقطع سلسلة؛ ويقطعها ما سُجّل له نصٌّ يخالف
+    present = sorted(g for g, s in m.items() if s.strip())
+    chain = {k: _chains(support[k], present) for k in cand}
+    owner, held = {}, set()         # كلُّ شاهدٍ لترتيبٍ واحد؛ وما تساوى فيه ترتيبان لا يُمسّ ولا يشهد
+    held |= alien
+    for t in tied:
+        held |= support[t]
+    for k in shadows:               # ما وافق الظلَّ مع جارٍ له ولم يوافق ترتيبًا: لعلّه ترتيبٌ قصيرٌ سليم، فلا يُمسّ
+        ch = _chains(support[k], present)
+        held |= {g for g in support[k] if ch[g] >= 2 and not any(g in support[t] for t in cand)}
+    for g in codes:
+        best = sorted(((chain[k][g], len(support[k]), k) for k in cand if g in support[k]), reverse=True)
+        if not best:
             continue
-        taken.append(k)
+        even = len(best) > 1 and best[0][0] == best[1][0] and (
+            best[0][1] == best[1][1] or abs(best[0][2] - best[1][2]) <= 3)      # بين متنازعَين: السلسلةُ وحدها تحكم
+        if even or (best[0][2] in rivals and best[0][0] < 2):
+            held.add(g)             # ومنه الشاهدُ المنفرد في ترتيبٍ متنازع: قد يكون عَرَضًا
+        else:
+            owner[g] = best[0][2]
+    lines = {}
+    for g, k in owner.items():
+        lines.setdefault(k, set()).add(g)
+    for k in list(lines):           # ما بقي للترتيب بعد القسمة: أيكفي؟
+        if len(lines[k]) < MIN_SUPPORT or (k in rivals and max(_chains(lines[k], present).values()) < CHAIN):
+            held |= lines.pop(k)
+    taken = {g + k for k, gs in lines.items() for g in gs}      # حروفُ الخطّ التي عُرفت رموزُها
+    out, guess = {}, set()          # guess: حرفٌ مسجَّلٌ بُدّل عند طرف ترتيب، فلا يُبنى عليه طرفٌ آخر
+    for k, own in sorted(lines.items(), key=lambda kv: -len(kv[1])):
         ok = set(own)               # الشهود، ويُزاد عليهم ما أُصلح: فالمُصلَح يشهد لجاره
-        settled |= own
         lo, hi = min(own), max(own)
         changed = True
         while changed:
             changed = False
             for g in range(lo - 1, hi + 2):
-                if g in settled or g in out or g not in m:
+                if g not in m or g in owner or g in held or g in out:
                     continue
                 want = _letter(g + k)
-                if want is None or m[g] == want:
+                if want is None or g + k in taken:
+                    continue
+                if reg.get(g) == want:
+                    continue
+                # للحرف في الترتيب صورُه لا أكثر (وفي ترتيب الحروف المنفردة رمزٌ واحد): فإن استوفتها جاراتُه فهو دخيل
+                room = len(_FORMS.get(want, ())) if g + k >= 0xFE80 else 1
+                if sum(1 for x in range(g - 2 * WINDOW + 1, g + 2 * WINDOW)
+                       if x != g and out.get(x, reg.get(x)) == want) >= room:
                     continue
                 left = [x for x in range(g - WINDOW, g) if x in ok]
                 right = [x for x in range(g + 1, g + WINDOW + 1) if x in ok]
-                # بين شاهدين، أو ملاصقٌ لثلاثة شهودٍ متقاربين من جهةٍ واحدة (طرفُ الترتيب)
-                if (left and right) or (g - 1 in ok and len(left) >= 3) or (g + 1 in ok and len(right) >= 3):
-                    out[g] = want
-                    ok.add(g)
-                    changed = True
+                if not (left and right):
+                    # طرفُ الترتيب: ملاصقٌ لثلاثة شهودٍ متقاربين من جهةٍ واحدة
+                    if g - 1 in ok and len(left) >= 3:
+                        near, up = g - 1, True
+                    elif g + 1 in ok and len(right) >= 3:
+                        near, up = g + 1, False
+                    else:
+                        continue
+                    # وحرفُه المسجَّل إن جاء على نسق جاره (هو أو ما يليه بقليل) فلعلّه أوّلُ ترتيبٍ آخر؛
+                    # ولا يُبنى تبديلُ حرفٍ على تبديل حرفٍ قبله، كيلا يسري التبديلُ في ترتيبٍ قصيرٍ سليم
+                    a, b = reg.get(g), _letter(near + k)
+                    if not a and m[g].strip():      # مسجَّلٌ له نصٌّ ليس حرفًا (مركّبٌ، أو علامة، أو غيرُ عربيّ):
+                        continue                    # لا يُملأ عند الطرف، فلعلّه رمزٌ دخيلٌ بعد آخر الترتيب
+                    if a and (near in guess or (b and 0 <= (ord(a) - ord(b)) * (1 if up else -1) <= 3)):
+                        continue
+                    # أو الحرفُ نفسُه مسجَّلٌ لرمزٍ قريبٍ وراءه (ترتيبٌ قصيرٌ قبل رموزٍ دخيلة)
+                    wide = range(g - WINDOW, g + 3 * WINDOW + 1) if up else range(g - 3 * WINDOW, g + WINDOW + 1)
+                    if sum(1 for x in wide if x != g and out.get(x, reg.get(x)) == want) >= room:
+                        continue
+                    if a:
+                        guess.add(g)
+                out[g] = want
+                ok.add(g)
+                taken.add(g + k)
+                changed = True
     return out
 
 
