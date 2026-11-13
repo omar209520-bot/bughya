@@ -145,11 +145,13 @@ def _align(text: str, ws: list, doubt: bool) -> list:
         if op == "equal" or (op == "replace" and i2 - i1 == j2 - j1):
             for k in range(i2 - i1):
                 boxes[i1 + k] = ws[j1 + k][1:]
+    # 1 لا يعرفها القاموس، 2 يعرفها وهي غريبةٌ بين جارتيها ولها بديلٌ في النقط يناسبهما (lexicon.marks)
+    mk = lexicon.marks(flat) if doubt else [0] * len(flat)
     out, k = [], 0
     for l in lines:
         row = []
         for t in l:
-            row.append({"t": t, "b": boxes[k], "d": bool(doubt and not lexicon.known(t))})
+            row.append({"t": t, "b": boxes[k], "d": bool(mk[k]), "c": mk[k] == 2})
             k += 1
         out.append(row)
     return out
@@ -1385,14 +1387,14 @@ async function drawWords(p){
   PVW=r;let doubts=0;
   const render=lines=>{const sp=lineSeps(lines.map(l=>l.map(w=>w.t).join(' ')));
     return lines.map((l,i)=>l.map(w=>{if(w.d)doubts++;
-    return '<span class="wd'+(w.d?' dq" title="ليست في قاموس كتبك، فقد تكون خطأً في القراءة الآلية: قابلها بالصورة':'')+'"'+(w.b?' data-b="'+w.b.join(',')+'"':'')+'>'+esc(w.t)+'</span>'}).join(' ')+(i<lines.length-1?sp[i]:'')).join('')};
+    return '<span class="wd'+(w.d?' dq" title="'+(w.c?'في قاموس كتبك، لكنّها لم ترد فيها بجوار ما حولها، وورد مكانَها ما يخالفها في النقط؛ فقد تكون خطأً في القراءة الآلية: قابلها بالصورة':'ليست في قاموس كتبك، فقد تكون خطأً في القراءة الآلية: قابلها بالصورة'):'')+'"'+(w.b?' data-b="'+w.b.join(',')+'"':'')+'>'+esc(w.t)+'</span>'}).join(' ')+(i<lines.length-1?sp[i]:'')).join('')};
   $('#pvbody').innerHTML=render(r.body||[]);
   if(r.foot&&r.foot.length&&p.foot)$('#pvfoot').innerHTML='<b>الحاشية:</b>\n'+render(r.foot);
   document.querySelectorAll('#pv .wd[data-b]').forEach(s=>s.onclick=()=>showWord(s));
   const n=document.createElement('div');n.className='note';
   n.textContent=!r.lexicon?'اضغط أي كلمة لترى موضعها في الصورة. (تعليم الكلمات المشكوك فيها يحتاج كتبًا نصيّة أكثر في مكتبتك.)'
-    :doubts?('اضغط أي كلمة لترى موضعها في الصورة. و'+AR(doubts)+' كلمةً تحتها خطٌّ متموّجٌ برتقاليّ، وتُؤطَّر في الصورة: ليست في قاموس كتبك، فقد تكون خطأً في القراءة الآلية، فقابلها بالصورة قبل نقلها. وما لا خطَّ تحته قد يكون خاطئًا أيضًا.')
-    :'اضغط أي كلمة لترى موضعها في الصورة. ولم تُعلَّم كلمةٌ في هذه الصفحة: كلُّها في قاموس كتبك، وهذا لا يعني أنّها كلَّها صواب.';
+    :doubts?('اضغط أي كلمة لترى موضعها في الصورة. و'+AR(doubts)+' كلمةً تحتها خطٌّ متموّجٌ برتقاليّ، وتُؤطَّر في الصورة: ليست في قاموس كتبك، أو هي فيه لكنّها غريبةٌ بين جارتيها؛ فقد تكون خطأً في القراءة الآلية، فقابلها بالصورة قبل نقلها. وما لا خطَّ تحته قد يكون خاطئًا أيضًا.')
+    :'اضغط أي كلمة لترى موضعها في الصورة. ولم تُعلَّم كلمةٌ في هذه الصفحة: كلُّها في قاموس كتبك وليس فيها ما يُستغرب موضعُه، وهذا لا يعني أنّها كلَّها صواب.';
   $('#pvnote').appendChild(n);
   drawImgBoxes();
 }
