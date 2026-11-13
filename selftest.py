@@ -119,6 +119,23 @@ def main() -> int:
                "%s / %s" % (v1["verdict"], v2["verdict"]))
         con.close()
 
+        # تعليمُ المشكوك فيه بالسياق: «فال» يعرفها القاموس، لكنّها قبل «الله» غريبة، و«قال الله» متكرّرة
+        import lexicon
+        import wajiha
+        con4 = store.connect()
+        lexicon.build(con4)
+        con4.close()
+        m = lexicon.marks("فال الله سبحانه ززززز".split())
+        row = wajiha._align("فال الله", [], True)[0]
+        report(lexicon.PAIRS.is_file() and m == [2, 0, 0, 1] and lexicon.marks("قال الله".split()) == [0, 0]
+               and lexicon.doubt("فال", None, "الله") and not lexicon.doubt("فال")
+               and row[0]["d"] and row[0]["c"] and not row[1]["d"],
+               "الكلمةُ المعروفة الغريبةُ بين جارتيها تُعلَّم بالسياق", "%s %s" % (m, row))
+        lexicon.PAIRS.unlink()
+        m = lexicon.marks("فال الله سبحانه ززززز".split())
+        report(m == [0, 0, 0, 1] and not lexicon.doubt("فال", None, "الله"),
+               "القاموسُ القديم بلا فهرس أزواج يعلّم كما كان", str(m))
+
         import tadqiq
         chap = TMP / "فصل.docx"
         make_docx(chap, [("قال المؤلف: «إن الماء طهور لا ينجسه شيء»", "1"),
