@@ -9,7 +9,7 @@
 """
 import arabic
 from readers import ReaderError, make_page
-from readers import layout, notes
+from readers import layout, notes, tounicode
 from readers.arabic_pdf import best_lines, sample_bias
 
 try:
@@ -76,6 +76,8 @@ class PdfBook:
         if self.doc.needs_pass:
             raise ReaderError("الملفُّ محميٌّ بكلمة سرّ.")
         self.kind, self.ocr = kind, ocr
+        # خريطةُ الحروف المعيبة في ملفّات وورد تُصلَح في الذاكرة قبل أيّ قراءة (tounicode.py)
+        self.fixed = tounicode.repair(self.doc) if kind == "pdf" else 0
         self.unit, self.approx = "صفحة", False
         self.total = self.doc.page_count
         md = self.doc.metadata or {}

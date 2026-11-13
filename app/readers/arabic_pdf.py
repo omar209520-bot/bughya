@@ -107,7 +107,13 @@ def rebuild(chars: list, size: float, reverse_groups: bool) -> str:
 def page_variants(page, fitz) -> list:
     """ثلاثُ صيغٍ لأسطر الصفحة: [نصُّ المكتبة، المبنيّ، المبنيّ بعكس المركّبات] — كلُّ سطرٍ {t, x, y, w, h, size}."""
     W, H = page.rect.width or 1, page.rect.height or 1
-    d = page.get_text("rawdict", flags=fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_MEDIABOX_CLIP)
+    flags = fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_MEDIABOX_CLIP
+    try:
+        d = page.get_text("rawdict", flags=flags)
+    except Exception:
+        # عطبٌ في المكتبة (1.28.2): فكُّها لبعض الحروف المركّبة يُخرج رقمَ حرفٍ لا يصحّ فتسقط الصفحةُ كلُّها.
+        # فتُطلب المركّباتُ كما هي، وclean_raw يفكّها. (لوحظ في صفحتَي المرجع 03 و05: كان نصُّهما يُؤخذ بلا بناء.)
+        d = page.get_text("rawdict", flags=flags | fitz.TEXT_PRESERVE_LIGATURES)
     native, built, flipped = [], [], []
     for b in d.get("blocks", []):
         if b.get("type") != 0:
