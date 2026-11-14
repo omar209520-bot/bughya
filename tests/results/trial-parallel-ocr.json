@@ -1,0 +1,65 @@
+{
+ "date": "2026-11-14 19:15",
+ "book_pages": 478,
+ "sample_pages": 40,
+ "words": 8951,
+ "logical_cpus": 8,
+ "render_s": 0.24,
+ "recognize_s": 1.031,
+ "runs": [
+  {
+   "workers": 0,
+   "label": "الآن",
+   "seconds": 66.47,
+   "per_page": 1.662
+  },
+  {
+   "workers": 1,
+   "seconds": 70.33,
+   "per_page": 1.758,
+   "ratio": 1.058,
+   "startup": 1.05,
+   "pages_changed": 0
+  },
+  {
+   "workers": 2,
+   "seconds": 42.63,
+   "per_page": 1.066,
+   "ratio": 0.641,
+   "startup": 0.6,
+   "pages_changed": 0
+  },
+  {
+   "workers": 3,
+   "seconds": 33.58,
+   "per_page": 0.84,
+   "ratio": 0.505,
+   "startup": 1.37,
+   "pages_changed": 0
+  },
+  {
+   "workers": 4,
+   "seconds": 31.27,
+   "per_page": 0.782,
+   "ratio": 0.471,
+   "startup": 1.07,
+   "pages_changed": 0
+  },
+  {
+   "workers": 6,
+   "seconds": 24.73,
+   "per_page": 0.618,
+   "ratio": 0.372,
+   "startup": 1.52,
+   "pages_changed": 0
+  },
+  {
+   "workers": 8,
+   "seconds": 22.45,
+   "per_page": 0.561,
+   "ratio": 0.338,
+   "startup": 1.26,
+   "pages_changed": 0
+  }
+ ]
+}
