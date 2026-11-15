@@ -1,0 +1,867 @@
+{
+ "date": "2026-11-14 14:00",
+ "pages": [
+  {
+   "id": "01",
+   "words": 228,
+   "now": {
+    "method": "ocr (نص الملف معيب)",
+    "wer": 0.0395,
+    "cer": 0.0096
+   },
+   "الحالي": {
+    "wer": 0.6404,
+    "cer": 0.1718
+   },
+   "المضمَّن": {
+    "wer": 0.0789,
+    "cer": 0.0078,
+    "fonts": [
+     {
+      "font": "adwa-assalaf",
+      "embedded_cmap": 11,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "TraditionalArabic",
+      "embedded_cmap": 251,
+      "letters_as_space": 34,
+      "known": 251,
+      "changed": 90
+     },
+     {
+      "font": "TraditionalArabic-Bold",
+      "embedded_cmap": 192,
+      "letters_as_space": 17,
+      "known": 192,
+      "changed": 89
+     }
+    ]
+   },
+   "المثبَّت": {
+    "wer": 0.0789,
+    "cer": 0.0078,
+    "fonts": [
+     {
+      "font": "adwa-assalaf",
+      "installed": true,
+      "installed_version": "Version 14.50 March 27, 2010",
+      "outlines_same": 12,
+      "outlines_drawn": 12,
+      "from_gsub": 12,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "TraditionalArabic",
+      "installed": true,
+      "installed_version": "Version 6.84",
+      "outlines_same": 592,
+      "outlines_drawn": 592,
+      "from_gsub": 450,
+      "letters_as_space": 35,
+      "known": 1056,
+      "changed": 678
+     },
+     {
+      "font": "TraditionalArabic-Bold",
+      "installed": true,
+      "installed_version": "Version 6.84",
+      "outlines_same": 487,
+      "outlines_drawn": 487,
+      "from_gsub": 450,
+      "letters_as_space": 17,
+      "known": 1056,
+      "changed": 715
+     }
+    ]
+   },
+   "كلاهما": {
+    "wer": 0.0789,
+    "cer": 0.0078,
+    "fonts": [
+     {
+      "font": "adwa-assalaf",
+      "installed": true,
+      "installed_version": "Version 14.50 March 27, 2010",
+      "outlines_same": 12,
+      "outlines_drawn": 12,
+      "from_gsub": 12,
+      "embedded_cmap": 11,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "TraditionalArabic",
+      "installed": true,
+      "installed_version": "Version 6.84",
+      "outlines_same": 592,
+      "outlines_drawn": 592,
+      "from_gsub": 450,
+      "embedded_cmap": 251,
+      "letters_as_space": 35,
+      "known": 1056,
+      "changed": 678
+     },
+     {
+      "font": "TraditionalArabic-Bold",
+      "installed": true,
+      "installed_version": "Version 6.84",
+      "outlines_same": 487,
+      "outlines_drawn": 487,
+      "from_gsub": 450,
+      "embedded_cmap": 192,
+      "letters_as_space": 17,
+      "known": 1056,
+      "changed": 715
+     }
+    ]
+   },
+   "accept": {
+    "method": "text",
+    "forced_ocr": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "02",
+   "words": 295,
+   "now": {
+    "method": "ocr (نص الملف معيب)",
+    "wer": 0.0814,
+    "cer": 0.019
+   },
+   "الحالي": {
+    "wer": 0.6915,
+    "cer": 0.1831
+   },
+   "المضمَّن": {
+    "wer": 0.0542,
+    "cer": 0.0177,
+    "fonts": [
+     {
+      "font": "adwa-assalaf",
+      "embedded_cmap": 11,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "TraditionalArabic",
+      "embedded_cmap": 251,
+      "letters_as_space": 34,
+      "known": 251,
+      "changed": 90
+     },
+     {
+      "font": "CourierNewPSMT",
+      "embedded_cmap": 6,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "TraditionalArabic-Bold",
+      "embedded_cmap": 192,
+      "letters_as_space": 17,
+      "known": 192,
+      "changed": 89
+     }
+    ]
+   },
+   "المثبَّت": {
+    "wer": 0.0373,
+    "cer": 0.0144,
+    "fonts": [
+     {
+      "font": "adwa-assalaf",
+      "installed": true,
+      "installed_version": "Version 14.50 March 27, 2010",
+      "outlines_same": 12,
+      "outlines_drawn": 12,
+      "from_gsub": 12,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "TraditionalArabic",
+      "installed": true,
+      "installed_version": "Version 6.84",
+      "outlines_same": 592,
+      "outlines_drawn": 592,
+      "from_gsub": 450,
+      "letters_as_space": 35,
+      "known": 1056,
+      "changed": 678
+     },
+     {
+      "font": "CourierNewPSMT",
+      "installed": true,
+      "installed_version": "Version 6.92",
+      "outlines_same": 7,
+      "outlines_drawn": 7,
+      "from_gsub": 423,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "TraditionalArabic-Bold",
+      "installed": true,
+      "installed_version": "Version 6.84",
+      "outlines_same": 487,
+      "outlines_drawn": 487,
+      "from_gsub": 450,
+      "letters_as_space": 17,
+      "known": 1056,
+      "changed": 715
+     }
+    ]
+   },
+   "كلاهما": {
+    "wer": 0.0373,
+    "cer": 0.0144,
+    "fonts": [
+     {
+      "font": "adwa-assalaf",
+      "installed": true,
+      "installed_version": "Version 14.50 March 27, 2010",
+      "outlines_same": 12,
+      "outlines_drawn": 12,
+      "from_gsub": 12,
+      "embedded_cmap": 11,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "TraditionalArabic",
+      "installed": true,
+      "installed_version": "Version 6.84",
+      "outlines_same": 592,
+      "outlines_drawn": 592,
+      "from_gsub": 450,
+      "embedded_cmap": 251,
+      "letters_as_space": 35,
+      "known": 1056,
+      "changed": 678
+     },
+     {
+      "font": "CourierNewPSMT",
+      "installed": true,
+      "installed_version": "Version 6.92",
+      "outlines_same": 7,
+      "outlines_drawn": 7,
+      "from_gsub": 423,
+      "embedded_cmap": 6,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "TraditionalArabic-Bold",
+      "installed": true,
+      "installed_version": "Version 6.84",
+      "outlines_same": 487,
+      "outlines_drawn": 487,
+      "from_gsub": 450,
+      "embedded_cmap": 192,
+      "letters_as_space": 17,
+      "known": 1056,
+      "changed": 715
+     }
+    ]
+   },
+   "accept": {
+    "method": "text",
+    "forced_ocr": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "03",
+   "words": 390,
+   "now": {
+    "method": "ocr (نص الملف معيب)",
+    "wer": 0.0872,
+    "cer": 0.0216
+   },
+   "الحالي": {
+    "wer": 0.2308,
+    "cer": 0.0664
+   },
+   "المضمَّن": {
+    "wer": 0.0692,
+    "cer": 0.0433,
+    "fonts": [
+     {
+      "font": "TraditionalArabic",
+      "embedded_cmap": 254,
+      "letters_as_space": 4,
+      "known": 254,
+      "changed": 57
+     },
+     {
+      "font": "TraditionalArabic-Bold",
+      "embedded_cmap": 231,
+      "letters_as_space": 4,
+      "known": 231,
+      "changed": 63
+     },
+     {
+      "font": "AGA-Arabesque",
+      "embedded_cmap": 0,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "QCF_BSML",
+      "embedded_cmap": 7,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "QCF_P002",
+      "embedded_cmap": 24,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "ArialMT",
+      "embedded_cmap": 96,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     }
+    ]
+   },
+   "المثبَّت": {
+    "wer": 0.0667,
+    "cer": 0.0423,
+    "fonts": [
+     {
+      "font": "TraditionalArabic",
+      "installed": true,
+      "installed_version": "Version 6.84",
+      "outlines_same": 615,
+      "outlines_drawn": 615,
+      "from_gsub": 450,
+      "letters_as_space": 5,
+      "known": 1056,
+      "changed": 630
+     },
+     {
+      "font": "TraditionalArabic-Bold",
+      "installed": true,
+      "installed_version": "Version 6.84",
+      "outlines_same": 588,
+      "outlines_drawn": 588,
+      "from_gsub": 450,
+      "letters_as_space": 4,
+      "known": 1056,
+      "changed": 648
+     },
+     {
+      "font": "AGA-Arabesque",
+      "installed": true,
+      "installed_version": "Version 2.10",
+      "outlines_same": 15,
+      "outlines_drawn": 15,
+      "from_gsub": 0,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "QCF_BSML",
+      "installed": true,
+      "installed_version": "version 5.10",
+      "outlines_same": 9,
+      "outlines_drawn": 9,
+      "from_gsub": 0,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "QCF_P002",
+      "installed": true,
+      "installed_version": "version 5.10",
+      "outlines_same": 26,
+      "outlines_drawn": 26,
+      "from_gsub": 0,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "ArialMT",
+      "installed": true,
+      "installed_version": "Version 7.00",
+      "outlines_same": 121,
+      "outlines_drawn": 121,
+      "from_gsub": 843,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     }
+    ]
+   },
+   "كلاهما": {
+    "wer": 0.0667,
+    "cer": 0.0423,
+    "fonts": [
+     {
+      "font": "TraditionalArabic",
+      "installed": true,
+      "installed_version": "Version 6.84",
+      "outlines_same": 615,
+      "outlines_drawn": 615,
+      "from_gsub": 450,
+      "embedded_cmap": 254,
+      "letters_as_space": 5,
+      "known": 1056,
+      "changed": 630
+     },
+     {
+      "font": "TraditionalArabic-Bold",
+      "installed": true,
+      "installed_version": "Version 6.84",
+      "outlines_same": 588,
+      "outlines_drawn": 588,
+      "from_gsub": 450,
+      "embedded_cmap": 231,
+      "letters_as_space": 4,
+      "known": 1056,
+      "changed": 648
+     },
+     {
+      "font": "AGA-Arabesque",
+      "installed": true,
+      "installed_version": "Version 2.10",
+      "outlines_same": 15,
+      "outlines_drawn": 15,
+      "from_gsub": 0,
+      "embedded_cmap": 0,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "QCF_BSML",
+      "installed": true,
+      "installed_version": "version 5.10",
+      "outlines_same": 9,
+      "outlines_drawn": 9,
+      "from_gsub": 0,
+      "embedded_cmap": 7,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "QCF_P002",
+      "installed": true,
+      "installed_version": "version 5.10",
+      "outlines_same": 26,
+      "outlines_drawn": 26,
+      "from_gsub": 0,
+      "embedded_cmap": 24,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "ArialMT",
+      "installed": true,
+      "installed_version": "Version 7.00",
+      "outlines_same": 121,
+      "outlines_drawn": 121,
+      "from_gsub": 843,
+      "embedded_cmap": 96,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     }
+    ]
+   },
+   "accept": {
+    "method": "text",
+    "forced_ocr": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "04",
+   "words": 359,
+   "now": {
+    "method": "text",
+    "wer": 0.0195,
+    "cer": 0.0025
+   },
+   "الحالي": {
+    "wer": 0.0195,
+    "cer": 0.0025
+   },
+   "المضمَّن": {
+    "wer": 0.0195,
+    "cer": 0.0025,
+    "fonts": [
+     {
+      "font": "Times New Roman",
+      "embedded_cmap": 183,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Times New Roman,Bold",
+      "embedded_cmap": 152,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Arial",
+      "embedded_cmap": 123,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Calibri",
+      "embedded_cmap": 36,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     }
+    ]
+   },
+   "المثبَّت": {
+    "wer": 0.0195,
+    "cer": 0.0025,
+    "fonts": [
+     {
+      "font": "Times New Roman",
+      "installed": true,
+      "installed_version": "Version 7.00",
+      "outlines_same": 245,
+      "outlines_drawn": 245,
+      "from_gsub": 851,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Times New Roman,Bold",
+      "installed": true,
+      "installed_version": "Version 7.00",
+      "outlines_same": 196,
+      "outlines_drawn": 196,
+      "from_gsub": 694,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Arial",
+      "installed": true,
+      "installed_version": "Version 7.00",
+      "outlines_same": 140,
+      "outlines_drawn": 147,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Calibri",
+      "installed": true,
+      "installed_version": "Version 6.23",
+      "outlines_same": 136,
+      "outlines_drawn": 136,
+      "from_gsub": 2730,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     }
+    ]
+   },
+   "كلاهما": {
+    "wer": 0.0195,
+    "cer": 0.0025,
+    "fonts": [
+     {
+      "font": "Times New Roman",
+      "installed": true,
+      "installed_version": "Version 7.00",
+      "outlines_same": 245,
+      "outlines_drawn": 245,
+      "from_gsub": 851,
+      "embedded_cmap": 183,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Times New Roman,Bold",
+      "installed": true,
+      "installed_version": "Version 7.00",
+      "outlines_same": 196,
+      "outlines_drawn": 196,
+      "from_gsub": 694,
+      "embedded_cmap": 152,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Arial",
+      "installed": true,
+      "installed_version": "Version 7.00",
+      "outlines_same": 140,
+      "outlines_drawn": 147,
+      "embedded_cmap": 123,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Calibri",
+      "installed": true,
+      "installed_version": "Version 6.23",
+      "outlines_same": 136,
+      "outlines_drawn": 136,
+      "from_gsub": 2730,
+      "embedded_cmap": 36,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     }
+    ]
+   },
+   "accept": {
+    "method": "text",
+    "forced_ocr": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "05",
+   "words": 310,
+   "now": {
+    "method": "text",
+    "wer": 0.0548,
+    "cer": 0.0175
+   },
+   "الحالي": {
+    "wer": 0.0548,
+    "cer": 0.0175
+   },
+   "المضمَّن": {
+    "wer": 0.0548,
+    "cer": 0.0175,
+    "fonts": [
+     {
+      "font": "Times New Roman",
+      "embedded_cmap": 183,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Arial",
+      "embedded_cmap": 123,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Symbol",
+      "embedded_cmap": 0,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Times New Roman,Bold",
+      "embedded_cmap": 152,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Calibri",
+      "embedded_cmap": 36,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     }
+    ]
+   },
+   "المثبَّت": {
+    "wer": 0.0548,
+    "cer": 0.0175,
+    "fonts": [
+     {
+      "font": "Times New Roman",
+      "installed": true,
+      "installed_version": "Version 7.00",
+      "outlines_same": 245,
+      "outlines_drawn": 245,
+      "from_gsub": 851,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Arial",
+      "installed": true,
+      "installed_version": "Version 7.00",
+      "outlines_same": 140,
+      "outlines_drawn": 147,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Symbol",
+      "installed": true,
+      "installed_version": "Version 5.01",
+      "outlines_same": 7,
+      "outlines_drawn": 7,
+      "from_gsub": 0,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Times New Roman,Bold",
+      "installed": true,
+      "installed_version": "Version 7.00",
+      "outlines_same": 196,
+      "outlines_drawn": 196,
+      "from_gsub": 694,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Calibri",
+      "installed": true,
+      "installed_version": "Version 6.23",
+      "outlines_same": 136,
+      "outlines_drawn": 136,
+      "from_gsub": 2730,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     }
+    ]
+   },
+   "كلاهما": {
+    "wer": 0.0548,
+    "cer": 0.0175,
+    "fonts": [
+     {
+      "font": "Times New Roman",
+      "installed": true,
+      "installed_version": "Version 7.00",
+      "outlines_same": 245,
+      "outlines_drawn": 245,
+      "from_gsub": 851,
+      "embedded_cmap": 183,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Arial",
+      "installed": true,
+      "installed_version": "Version 7.00",
+      "outlines_same": 140,
+      "outlines_drawn": 147,
+      "embedded_cmap": 123,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Symbol",
+      "installed": true,
+      "installed_version": "Version 5.01",
+      "outlines_same": 7,
+      "outlines_drawn": 7,
+      "from_gsub": 0,
+      "embedded_cmap": 0,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Times New Roman,Bold",
+      "installed": true,
+      "installed_version": "Version 7.00",
+      "outlines_same": 196,
+      "outlines_drawn": 196,
+      "from_gsub": 694,
+      "embedded_cmap": 152,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Calibri",
+      "installed": true,
+      "installed_version": "Version 6.23",
+      "outlines_same": 136,
+      "outlines_drawn": 136,
+      "from_gsub": 2730,
+      "embedded_cmap": 36,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     }
+    ]
+   },
+   "accept": {
+    "method": "text",
+    "forced_ocr": false,
+    "note": ""
+   }
+  },
+  {
+   "id": "10",
+   "words": 207,
+   "now": {
+    "method": "text",
+    "wer": 0.0,
+    "cer": 0.0
+   },
+   "الحالي": {
+    "wer": 0.0,
+    "cer": 0.0
+   },
+   "المضمَّن": {
+    "wer": 0.0,
+    "cer": 0.0,
+    "fonts": [
+     {
+      "font": "Tahoma0",
+      "embedded_cmap": 822,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Tahoma,BoldB0",
+      "embedded_cmap": 822,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     }
+    ]
+   },
+   "المثبَّت": {
+    "wer": 0.0,
+    "cer": 0.0,
+    "fonts": [
+     {
+      "font": "Tahoma0",
+      "installed": false,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Tahoma,BoldB0",
+      "installed": false,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     }
+    ]
+   },
+   "كلاهما": {
+    "wer": 0.0,
+    "cer": 0.0,
+    "fonts": [
+     {
+      "font": "Tahoma0",
+      "installed": false,
+      "embedded_cmap": 822,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     },
+     {
+      "font": "Tahoma,BoldB0",
+      "installed": false,
+      "embedded_cmap": 822,
+      "letters_as_space": 0,
+      "note": "خريطتُه سليمة: لم يُمسّ"
+     }
+    ]
+   },
+   "accept": {
+    "method": "text",
+    "forced_ocr": false,
+    "note": ""
+   }
+  }
+ ]
+}
