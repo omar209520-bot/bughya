@@ -123,14 +123,27 @@ def _arabic_share(t: str) -> float:
     return sum(1 for c in letters if "\u0600" <= c <= "\u06FF") / len(letters) if letters else 0.0
 
 
-def _glued(prev: dict, p: dict, gap: float, text: str) -> bool:
+_JOINT = set("/()[].:،؛-")
+
+
+def _glued(prev: dict, p: dict, gap: float, text: str, rtl: bool = True) -> bool:
     """قطعتان من كلمةٍ واحدة قسمتهما مكتبةُ القراءة («ال» + «عصر»، «والثقافي» + «ة»، «الثا» + «لث»)، لنصّ الملفّ وحده.
     المواضعُ لا تكفي: في ملفّات وورد قد تتلاصق كلمتان تامّتان بلا مسافةٍ في الملف («مسألة» + «الذكر»). فالشرط مع التلاصق
     أن يكون أحدُ الطرفين قصيرًا لا يقوم كلمةً وحده (حرفًا أو حرفين، أو «ال» وبعدها حرفان على الأكثر)؛ ولا يُضمّ ما بعد
     «ة» أو «ى» (آخرُ الكلمة)، ولا ما يبدأ بـ«ال» بعد كلمةٍ تامّة، ولا كلمةٌ شائعة («في»، «قد»)، ولا «و» وحدها بعد كلمة."""
-    if "sp" not in prev or "sp" not in p or prev["sp"] or p["sp"] or not text or not p["t"]:
+    if "sp" not in prev or "sp" not in p or not text or not p["t"]:
+        return False
+    if "spl" in prev and "spl" in p:        # المسافةُ التي في الملف عند موضع الالتقاء وحده تمنع الضمّ، لا التي في الطرف الآخر
+        if (prev["spl"] or p["spr"]) if rtl else (prev["spr"] or p["spl"]):
+            return False
+    elif prev["sp"] or p["sp"]:
         return False
     a, b = text[-1], p["t"][0]
+    tight = gap * p["pw"] < 0.15 * max(p.get("size") or 0, prev.get("size") or 0)
+    # رقمٌ وعلامةٌ متلاصقان بلا مسافةٍ في الملف: «5» + «/»، «(» + «12»، «117» + «.)». ولا يُضمّ رقمٌ إلى رقم
+    # (رقما حاشيتين متجاورين)، ولا رقمٌ إلى كلمة.
+    if tight and ((a.isdigit() and b in _JOINT) or (a in _JOINT and b.isdigit()) or (a in _JOINT and b in _JOINT)):
+        return True
     if not ("ء" <= a <= "ي" and "ء" <= b <= "ي") or a in "ةى":
         return False
     if gap * p["pw"] >= 0.15 * max(p.get("size") or 0, prev.get("size") or 0):
@@ -170,7 +183,7 @@ def merge_baselines(lines: list) -> list:
         for p in parts:
             if prev is not None:
                 gap = (prev["x"] - (p["x"] + p["w"])) if rtl else (p["x"] - (prev["x"] + prev["w"]))
-                if _glued(prev, p, gap, text):
+                if _glued(prev, p, gap, text, rtl):
                     pass
                 else:
                     text += "  " if gap > 0.08 else " "

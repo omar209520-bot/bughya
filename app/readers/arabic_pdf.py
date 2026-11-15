@@ -129,6 +129,11 @@ def page_variants(page, fitz) -> list:
             size = sorted(sizes)[len(sizes) // 2] if sizes else 10.0
             geo = {"x": x0 / W, "y": y0 / H, "w": (x1 - x0) / W, "h": max(1e-4, (y1 - y0) / H), "size": size,
                    "pw": W, "sp": t != t.strip()}     # عرضُ الصفحة، وهل في طرف القطعة مسافةٌ في الملف (لضمّ القطع)
+            # وأيُّ الطرفين: مسافةٌ في الملف يسارَ المرسوم كلِّه (spl) أو يمينَه (spr)، بمواضعها لا بترتيب ورودها
+            ink = [c for c in chars if c[0].strip()]
+            lo, hi = min(c[1] for c in ink), max(c[2] for c in ink)
+            blanks = [(c[1] + c[2]) / 2 for c in chars if not c[0].strip()]
+            geo["spl"], geo["spr"] = any(x < lo for x in blanks), any(x > hi for x in blanks)
             native.append(dict(geo, t=arabic.clean_raw(t)))
             horizontal = abs(ln.get("dir", (1, 0))[1]) < 0.1
             if horizontal and any(_is_ar(c[0]) for c in chars):
