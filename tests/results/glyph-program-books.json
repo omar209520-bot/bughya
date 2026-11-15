@@ -1,0 +1,138 @@
+{
+ "date": "2026-11-15 16:32",
+ "bad": [
+  {
+   "id": 1,
+   "pages": 16,
+   "fixed": 182,
+   "repair_s": 0.05,
+   "open_s": 9.0,
+   "reads_text": true
+  },
+  {
+   "id": 2,
+   "pages": 483,
+   "fixed": 3423,
+   "repair_s": 0.26,
+   "open_s": 4.1,
+   "reads_text": false
+  },
+  {
+   "id": 4,
+   "pages": 6,
+   "fixed": 0,
+   "repair_s": 0.0,
+   "open_s": 5.2,
+   "reads_text": false
+  },
+  {
+   "id": 15,
+   "pages": 16,
+   "fixed": 182,
+   "repair_s": 0.01,
+   "open_s": 6.4,
+   "reads_text": true
+  },
+  {
+   "id": 18,
+   "pages": 1,
+   "fixed": 0,
+   "repair_s": 0.01,
+   "open_s": 2.6,
+   "reads_text": false
+  },
+  {
+   "id": 22,
+   "pages": 11,
+   "fixed": 297,
+   "repair_s": 0.02,
+   "open_s": 6.3,
+   "reads_text": true
+  },
+  {
+   "id": 23,
+   "pages": 11,
+   "fixed": 297,
+   "repair_s": 0.05,
+   "open_s": 5.5,
+   "reads_text": true
+  },
+  {
+   "id": 27,
+   "pages": 10,
+   "fixed": 264,
+   "repair_s": 0.02,
+   "open_s": 7.6,
+   "reads_text": true
+  },
+  {
+   "id": 29,
+   "pages": 6,
+   "fixed": 197,
+   "repair_s": 0.02,
+   "open_s": 5.7,
+   "reads_text": true
+  },
+  {
+   "id": 32,
+   "pages": 11,
+   "fixed": 298,
+   "repair_s": 0.02,
+   "open_s": 6.3,
+   "reads_text": true
+  },
+  {
+   "id": 33,
+   "pages": 12,
+   "fixed": 304,
+   "repair_s": 0.06,
+   "open_s": 5.6,
+   "reads_text": true
+  },
+  {
+   "id": 41,
+   "pages": 239,
+   "fixed": 0,
+   "repair_s": 0.1,
+   "open_s": 8.6,
+   "reads_text": false
+  },
+  {
+   "id": 44,
+   "pages": 9,
+   "fixed": 0,
+   "repair_s": 0.01,
+   "open_s": 4.6,
+   "reads_text": false
+  },
+  {
+   "id": 47,
+   "pages": 98,
+   "fixed": 0,
+   "repair_s": 0.01,
+   "open_s": 4.5,
+   "reads_text": false
+  },
+  {
+   "id": 49,
+   "pages": 102,
+   "fixed": 0,
+   "repair_s": 0.02,
+   "open_s": 2.2,
+   "reads_text": false
+  },
+  {
+   "id": 53,
+   "pages": 30,
+   "fixed": 2156,
+   "repair_s": 0.04,
+   "open_s": 5.6,
+   "reads_text": true
+  }
+ ],
+ "pdfs_checked": 60,
+ "pdfs_touched": 9,
+ "slowest_repair_s": 0.48,
+ "text_pages": 123,
+ "all_pages": 1061
+}
