@@ -157,6 +157,19 @@ def _align(text: str, ws: list, doubt: bool) -> list:
     return out
 
 
+def _repaired(book_id: int) -> bool:
+    import store
+    con = store.connect(readonly=True)
+    try:
+        r = con.execute("SELECT hints FROM books WHERE id = ?", (book_id,)).fetchone()
+    finally:
+        con.close()
+    try:
+        return bool(r and r[0] and json.loads(r[0]).get("glyphmap"))
+    except ValueError:
+        return False
+
+
 def api_words(q: dict):
     """الصفحةُ المقروءة آليًّا كلماتٍ بمواضعها في الصورة، مع تعليم ما لا يعرفه القاموس."""
     import lexicon
@@ -167,8 +180,18 @@ def api_words(q: dict):
         boxes = store.boxes_of(p) if p is not None else []
     finally:
         con.close()
-    if p is None or p["method"] != "ocr":
+    if p is None:
         return {"words": False}
+    if p["method"] != "ocr":
+        # صفحةٌ من ملفّ وورد أُعيد بناءُ نصّه من خطّه المضمَّن (readers/glyphmap.py): نصُّها قد يخطئ في البناء
+        # («المكرب» لـ«المركب»)، فيُعلَّم فيها المشكوك فيه كالمقروءة آليًّا، بلا مواضعَ في الصورة
+        if p["method"] != "text" or not _repaired(int(q["b"])):
+            return {"words": False}
+        doubt = lexicon.ready()
+        res = {"words": True, "lexicon": doubt, "text": True}
+        for key in ("body", "foot"):
+            res[key] = _align(p[key], [], doubt)
+        return res
     if not any(bx.get("ws") for bx in boxes):     # قُرئ بإصدارٍ قبل حفظ مواضع الكلمات
         return {"words": False, "old": True}
     doubt = lexicon.ready()
@@ -1384,15 +1407,17 @@ async function drawWords(p){
   PVW=null;const r=await api('/api/words',{b:p.book_id,n:p.n});
   if(PV.n!=p.n||PV.b!=p.book_id)return;
   if(!r.words){if(r.old){const n=document.createElement('div');n.className='note';n.textContent='قُرئ هذا الكتاب بإصدارٍ أقدم من «بُغية»، فلا تظهر فيه مواضعُ الكلمات في الصورة ولا تعليمُ المشكوك فيها. أعد قراءتَه لتظهر.';const bt=document.createElement('button');bt.className='btn2';bt.textContent='أعد قراءة هذا الكتاب';bt.onclick=async()=>{const x=await api('/api/reread-book',null,{b:p.book_id});toast(x.error||'بدأت إعادةُ القراءة');pollProgress()};n.appendChild(document.createTextNode(' '));n.appendChild(bt);$('#pvnote').appendChild(n);}return;}
-  PVW=r;let doubts=0;
+  PVW=r;let doubts=0;const SRC=r.text?'خطأً في بناء نصّ الملفّ':'خطأً في القراءة الآلية';
   const render=lines=>{const sp=lineSeps(lines.map(l=>l.map(w=>w.t).join(' ')));
     return lines.map((l,i)=>l.map(w=>{if(w.d)doubts++;
-    return '<span class="wd'+(w.d?' dq" title="'+(w.c?'في قاموس كتبك، لكنّها لم ترد فيها بجوار ما حولها، وورد مكانَها ما يخالفها في النقط؛ فقد تكون خطأً في القراءة الآلية: قابلها بالصورة':'ليست في قاموس كتبك، فقد تكون خطأً في القراءة الآلية: قابلها بالصورة'):'')+'"'+(w.b?' data-b="'+w.b.join(',')+'"':'')+'>'+esc(w.t)+'</span>'}).join(' ')+(i<lines.length-1?sp[i]:'')).join('')};
+    return '<span class="wd'+(w.d?' dq" title="'+(w.c?'في قاموس كتبك، لكنّها لم ترد فيها بجوار ما حولها، وورد مكانَها ما يخالفها في النقط؛ فقد تكون '+SRC+': قابلها بالصورة':'ليست في قاموس كتبك، فقد تكون '+SRC+': قابلها بالصورة'):'')+'"'+(w.b?' data-b="'+w.b.join(',')+'"':'')+'>'+esc(w.t)+'</span>'}).join(' ')+(i<lines.length-1?sp[i]:'')).join('')};
   $('#pvbody').innerHTML=render(r.body||[]);
   if(r.foot&&r.foot.length&&p.foot)$('#pvfoot').innerHTML='<b>الحاشية:</b>\n'+render(r.foot);
   document.querySelectorAll('#pv .wd[data-b]').forEach(s=>s.onclick=()=>showWord(s));
   const n=document.createElement('div');n.className='note';
-  n.textContent=!r.lexicon?'اضغط أي كلمة لترى موضعها في الصورة. (تعليم الكلمات المشكوك فيها يحتاج كتبًا نصيّة أكثر في مكتبتك.)'
+  n.textContent=r.text?(!r.lexicon?'':doubts?('نصُّ هذا الملفّ أُعيد بناؤه من خطّه، وقد يخطئ البناء. و'+AR(doubts)+' كلمةً تحتها خطٌّ متموّجٌ برتقاليّ: ليست في قاموس كتبك، أو هي فيه لكنّها غريبةٌ بين جارتيها؛ فقابلها بصورة الصفحة قبل نقلها. وما لا خطَّ تحته قد يكون خاطئًا أيضًا.')
+    :'نصُّ هذا الملفّ أُعيد بناؤه من خطّه، ولم تُعلَّم كلمةٌ في هذه الصفحة؛ وهذا لا يعني أنّها كلَّها صواب.')
+    :!r.lexicon?'اضغط أي كلمة لترى موضعها في الصورة. (تعليم الكلمات المشكوك فيها يحتاج كتبًا نصيّة أكثر في مكتبتك.)'
     :doubts?('اضغط أي كلمة لترى موضعها في الصورة. و'+AR(doubts)+' كلمةً تحتها خطٌّ متموّجٌ برتقاليّ، وتُؤطَّر في الصورة: ليست في قاموس كتبك، أو هي فيه لكنّها غريبةٌ بين جارتيها؛ فقد تكون خطأً في القراءة الآلية، فقابلها بالصورة قبل نقلها. وما لا خطَّ تحته قد يكون خاطئًا أيضًا.')
     :'اضغط أي كلمة لترى موضعها في الصورة. ولم تُعلَّم كلمةٌ في هذه الصفحة: كلُّها في قاموس كتبك وليس فيها ما يُستغرب موضعُه، وهذا لا يعني أنّها كلَّها صواب.';
   $('#pvnote').appendChild(n);
