@@ -1076,6 +1076,9 @@ details.more summary{cursor:pointer;width:max-content}
 .sbar .cov{font-size:13px;color:var(--mute)}
 .dd{position:relative}.ddp{display:none;position:absolute;top:calc(100% + 4px);inset-inline-start:0;z-index:6;background:var(--card);border:1px solid var(--gold);border-radius:8px;box-shadow:0 6px 18px #0002;padding:10px 14px;width:max-content;max-width:min(440px,86vw)}
 .dd.on>.ddp{display:block}
+.ddgo{border-top:1px solid var(--line);margin:10px -14px -4px;padding:4px 0 0}
+.ddgo button{display:block;width:100%;text-align:right;background:none;border:0;color:var(--acc);padding:6px 14px;font:14px var(--ui);cursor:pointer}
+.ddgo button:hover{background:var(--acc2)}
 .ddp .opts{flex-direction:column;align-items:flex-start;gap:8px;margin:0}
 .btn3{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:5px 12px;font-size:14px;cursor:pointer;white-space:nowrap}
 .btn3:hover{border-color:var(--gold)}.btn3:disabled{opacity:.4;cursor:default}
@@ -1340,8 +1343,8 @@ header .ver button{background:none;border:0;color:#e9e2c8;font:12px var(--ui);cu
 <label title="يجد الكلمة وإن أخطأت القراءةُ الآليّة في نقاطها"><input type="checkbox" id="rasm"> تسامحٌ مع أخطاء النقاط</label>
 <label>الترتيب <select id="order"><option value="rank">الأقرب صلة</option><option value="book">بالكتاب والصفحة</option></select></label>
 </div>
-<div class="help" id="mhelp"></div></div></span>
-<button type="button" class="btn3" data-go="jiwar">ألفاظٌ مجاورة</button><button type="button" class="btn3" data-go="groups">مجموعات الألفاظ</button>
+<div class="help" id="mhelp"></div>
+<div class="ddgo"><button type="button" data-go="jiwar">ألفاظٌ مجاورة</button><button type="button" data-go="groups">مجموعات الألفاظ</button></div></div></span>
 <span class="cov" id="cov"></span></div>
 <div class="tabs" id="rtabs"><button type="button" data-tab="res" class="on">النتائج</button><button type="button" data-tab="txt">النصّ</button><button type="button" data-tab="img">الصورة</button></div>
 <main class="rd nopage" id="pv" data-tab="res">
@@ -1439,7 +1442,7 @@ setInterval(()=>fetch('/api/ping').catch(()=>{}),20000);
 
 // ── التبويبات
 document.querySelectorAll('header nav button').forEach(b=>b.onclick=()=>show(b.dataset.p));
-document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>show(b.dataset.go));
+document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.dd.on').forEach(x=>x.classList.remove('on'));show(b.dataset.go)});
 // أشرطةُ التنبيه فوق الشاشات (التحديث، القراءة الآليّة، تقدّمُ القراءة) تأخذ من ارتفاع شاشة البحث، فلا يخرج أسفلُ أعمدتها عن النافذة
 (function(){const bars=['#updbar','#ocrbar','#progbar'].map(s=>$(s)).filter(Boolean);
   const fit=()=>document.documentElement.style.setProperty('--bh',bars.reduce((h,b)=>h+b.offsetHeight,0)+'px');
@@ -1464,7 +1467,14 @@ $('#mode').onchange=()=>{$('#distw').style.display=$('#mode').value=='near'?'':'
 $('#mhelp').textContent=HELP.phrase;
 // القوائمُ المنسدلة (خيارات البحث، الكتب، الفهرس، المزيد): تُفتح بزرّها، وتُغلق بالضغط خارجها أو بـEsc
 document.querySelectorAll('.dd>button').forEach(b=>b.onclick=e=>{e.stopPropagation();const d=b.parentElement,on=!d.classList.contains('on');
-  document.querySelectorAll('.dd.on').forEach(x=>x.classList.remove('on'));d.classList.toggle('on',on)});
+  document.querySelectorAll('.dd.on').forEach(x=>x.classList.remove('on'));d.classList.toggle('on',on);if(on)fitDD(d)});
+// القائمةُ تُفتح من جهة زرّها؛ فإن خرجت عن النافذة فُتحت من الجهة الأخرى، وإلّا ضاقت
+function fitDD(d){const p=d.querySelector('.ddp'),e=document.documentElement;p.style.insetInlineStart=p.style.insetInlineEnd=p.style.maxWidth='';
+  const out=()=>{const r=p.getBoundingClientRect();return e.scrollWidth>e.clientWidth||r.left<0};
+  if(!out())return;
+  p.style.insetInlineStart='auto';p.style.insetInlineEnd='0';
+  if(!out())return;
+  p.style.insetInlineStart='0';p.style.insetInlineEnd='';p.style.maxWidth=Math.max(200,d.getBoundingClientRect().right-8)+'px'}
 document.addEventListener('click',e=>{if(!e.target.closest('.ddp'))document.querySelectorAll('.dd.on').forEach(x=>x.classList.remove('on'))});
 document.addEventListener('keydown',e=>{if(e.key=='Escape')document.querySelectorAll('.dd.on').forEach(x=>x.classList.remove('on'))});
 document.querySelectorAll('#pvmore .ddp button').forEach(b=>b.addEventListener('click',()=>$('#pvmore').classList.remove('on')));
