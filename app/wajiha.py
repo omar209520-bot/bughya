@@ -1096,6 +1096,19 @@ main.rd>*{min-width:0;min-height:0;overflow:auto}
 .ibtn:hover{border-color:var(--gold)}
 main.rd.noimg #imgcol{padding:14px 5px}main.rd.noimg #imgcol .chd b,main.rd.noimg #imgcol .zbtn,main.rd.noimg #pvimgw{display:none}
 main.rd.nopage #imgcol{display:none}
+/* تصفّحُ الكتاب وحده: الصفحةُ وصورتُها بعرض الشاشة */
+#p-search.read .sbar,#p-search.read #rescol,#p-search.read #rtabs [data-tab=res]{display:none}
+#p-search.read main.rd{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}#p-search.read main.rd.noimg{grid-template-columns:minmax(0,1fr) 46px}
+#p-search.read main.rd.nopage{grid-template-columns:minmax(0,1fr)}#p-search.read main.rd.nopage #pvwrap{max-width:60em;margin:0 auto}
+#p-search.read #pvcol{padding-inline:34px}
+/* قبل أوّل بحث: شاشةٌ واحدةٌ بلا أعمدة، فيها الإرشاد وما ينفع (آخرُ ما بُحث عنه، والمجموعات، والمكتبة) */
+main.rd.start,main.rd.start.nopage{display:block}main.rd.start #rescol,main.rd.start #imgcol,main.rd.start #pvempty{display:none}
+#pvstart{display:none;max-width:780px;margin:0 auto;padding:26px 6px}main.rd.start #pvstart{display:block}
+body:has(main.rd.start) #rtabs{display:none}
+#pvstart .lead{font-size:15px;color:var(--mute);line-height:1.8;margin-bottom:18px}
+#pvstart .sbox{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:12px}
+#pvstart .sbox h3{font:600 15px var(--ui);margin:0 0 8px}
+#pvstart .chip{font:17px/1.6 var(--text);margin:3px;padding:2px 14px}#pvstart .chip:hover{border-color:var(--gold)}
 .tabs{display:none}
 aside h3{font-size:14px;font-weight:600;margin:0 0 6px}
 .bk{display:flex;gap:6px;font-size:14px;line-height:1.5;padding:5px 0;cursor:pointer}
@@ -1255,6 +1268,7 @@ header .ver button{background:none;border:0;color:#e9e2c8;font:12px var(--ui);cu
 #nvd i{font-style:normal;font-size:11px;line-height:1.5;background:var(--gold);color:#1b1b12;border-radius:9px;padding:0 5px;position:absolute;top:2px;inset-inline-end:4px}
 /* أضيقُ من نحو ١٢٠٠: الصورةُ تحت النصّ، والنتائجُ في عمودها */
 @media(max-width:1200px){
+ #p-search.read main.rd,#p-search.read main.rd.noimg,#p-search.read main.rd.nopage{grid-template-columns:minmax(0,1fr)}#p-search.read #imgcol{grid-column:1}
  main.rd,main.rd.noimg,main.rd.nopage{grid-template-columns:240px minmax(0,1fr);grid-template-rows:max-content max-content;overflow:auto;align-content:start}
  main.rd>*{overflow:visible}
  #rescol{grid-row:1/span 2;position:sticky;top:0;align-self:start;height:calc(100vh / var(--z,1) - 72px);overflow:auto!important}
@@ -1347,14 +1361,15 @@ header .ver button{background:none;border:0;color:#e9e2c8;font:12px var(--ui);cu
 <div class="ddgo"><button type="button" data-go="jiwar">ألفاظٌ مجاورة</button><button type="button" data-go="groups">مجموعات الألفاظ</button></div></div></span>
 <span class="cov" id="cov"></span></div>
 <div class="tabs" id="rtabs"><button type="button" data-tab="res" class="on">النتائج</button><button type="button" data-tab="txt">النصّ</button><button type="button" data-tab="img">الصورة</button></div>
-<main class="rd nopage" id="pv" data-tab="res">
+<main class="rd nopage start" id="pv" data-tab="res">
 <aside id="rescol"><div id="rhead"><span id="rsum"></span><span class="dd" id="facetw" style="display:none"><button type="button" class="btn3" id="facetb"></button><div class="ddp" id="facet"></div></span></div><section id="results"><div class="wait">اكتب ما تبحث عنه ثمّ «ابحث».<br><span style="font-size:14px">البحثُ بالكلمة وسوابقها (و، ف، ب، ك، ل، ال) لا بالجذر؛ والنجمةُ في صيغة المتمرّس بادئة: <b>صلا*</b></span></div></section></aside>
-<section id="pvcol"><div class="pvempty" id="pvempty">اختر نتيجةً لتقرأ صفحتها هنا، وصورتُها بجانبها.</div>
+<section id="pvcol"><div class="pvempty" id="pvempty">اختر نتيجةً لتقرأ صفحتها هنا، وصورتُها بجانبها.</div><div id="pvstart"></div>
 <div id="pvwrap" style="display:none">
-<div class="pvtop"><div id="pvcite"></div>
+<div class="pvtop"><button type="button" class="btn3" id="pvback" style="display:none"><svg class="i"><use href="#i-prev"/></svg><span>رجوع</span></button><div id="pvcite"></div>
 <div class="pnav"><button type="button" class="btn3" id="pvprev" title="السهم الأيمن"><svg class="i"><use href="#i-prev"/></svg>السابقة</button>
 <span class="pos"><input type="number" id="pvgo" min="1" title="اكتب رقمَ صفحةٍ ثمّ Enter"><span id="pvtot"></span></span>
 <button type="button" class="btn3" id="pvnext" title="السهم الأيسر">التالية<svg class="i"><use href="#i-next"/></svg></button></div>
+<button type="button" class="btn3" id="pvsearch2" style="display:none"><svg class="i"><use href="#i-search"/></svg>ابحث في هذا الكتاب</button>
 <span class="dd" id="pvtocw" style="display:none"><button type="button" class="ibtn" id="pvtocb" title="الفهرس" aria-label="الفهرس"><svg class="i"><use href="#i-toc"/></svg></button><div class="ddp" id="pvtoc"></div></span>
 <span class="dd" id="pvmore"><button type="button" class="ibtn" id="pvmoreb" title="المزيد" aria-label="المزيد"><svg class="i"><use href="#i-more"/></svg></button><div class="ddp">
 <button type="button" id="pvsearch"><svg class="i"><use href="#i-search"/></svg>ابحث في هذا الكتاب</button>
@@ -1450,6 +1465,7 @@ document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{document.queryS
 // الشاشاتُ التي ليس لها قسمٌ في الشريط تُعلِّم القسمَ الذي تُفتح منه
 const NAVOF={welcome:'books',status:'books',jiwar:'search',groups:'search'};
 function show(p){
+  if(p=='search'&&READ){READ=null;setRead()}
   document.querySelectorAll('header nav button').forEach(x=>x.classList.toggle('on',x.dataset.p==(NAVOF[p]||p)));
   document.querySelectorAll('.panel').forEach(x=>x.classList.toggle('on',x.id=='p-'+p));
   if(p=='books')loadBooks(); if(p=='status')loadStatus(); if(p=='groups')loadGroups(); if(p=='welcome')loadSources(); if(p=='draft')loadDrafts();
@@ -1482,6 +1498,7 @@ $('#sf').onsubmit=e=>{e.preventDefault();S.books.clear();newSearch($('#q').value
 ['layer','exact','rasm','order','fann'].forEach(id=>$('#'+id).onchange=()=>{if(S.q)newSearch(S.q,S.mode,true)});
 function newSearch(q,mode,keepBooks){
   q=q.trim(); if(!q)return; S.q=q;S.mode=mode;S.offset=0;S.results=[]; if(!keepBooks)S.books.clear();
+  $('#pv').classList.remove('start');if(mode!='group')remember(q,mode);
   S.params={q,mode,dist:$('#dist').value,layer:$('#layer').value,exact:$('#exact').checked?1:0,rasm:$('#rasm').checked?1:0,order:$('#order').value,fann:$('#fann').value};
   run(true);
 }
@@ -1495,9 +1512,26 @@ async function run(withFacet){
   if(g!=GEN)return;            // بحثٌ أحدثُ منه بدأ
   if(r.error){res.innerHTML='<div class="wait err">'+esc(r.error)+'</div>';return}
   if(r.coverage)setCov(r.coverage);
+  const first=S.offset==0;
   S.total=r.pages;S.bookN=r.books;S.results=S.results.concat(r.results);
   drawResults();
+  if(first&&S.results.length){const x=S.results[0];openPage(x.book_id,x.n,true,true)}   // أوّلُ نتيجةٍ تُفتح وحدها، فلا يبقى عمودُ النصّ فارغًا
 }
+// آخرُ ما بُحث عنه: على هذا الجهاز وحده (في المتصفّح)، ويُضغط فيُبحث به ثانية
+function recent(){try{return JSON.parse(localStorage.getItem('bughya-recent')||'[]')}catch(e){return []}}
+function remember(q,mode){try{const a=recent().filter(x=>!(x.q==q&&x.mode==mode));a.unshift({q,mode});localStorage.setItem('bughya-recent',JSON.stringify(a.slice(0,10)))}catch(e){}}
+async function drawStart(){
+  const w=$('#pvstart'),rec=recent();let gs=[];try{gs=await api('/api/groups')}catch(e){}
+  w.innerHTML='<div class="lead">اكتب ما تبحث عنه ثمّ «ابحث». البحثُ بالكلمة وسوابقها (و، ف، ب، ك، ل، ال) لا بالجذر؛ والنجمةُ في صيغة المتمرّس بادئة: <b>صلا*</b></div>'+
+    (rec.length?'<div class="sbox"><h3>آخرُ ما بحثتَ عنه</h3>'+rec.map((x,i)=>'<button type="button" class="chip" data-rq="'+i+'">'+esc(x.q)+'</button>').join('')+'</div>':'')+
+    (Array.isArray(gs)&&gs.length?'<div class="sbox"><h3>مجموعاتُ ألفاظك</h3>'+gs.map((g,i)=>'<button type="button" class="chip" data-rg="'+i+'" title="'+esc(g.terms.join(' · '))+'">'+esc(g.name)+' <i>'+AR(g.terms.length)+'</i></button>').join('')+'</div>':'')+
+    '<div class="sbox"><h3>مكتبتُك</h3><span id="stcov" class="muted"></span> <button type="button" class="btn2" data-go2="books">كتبي</button></div>';
+  if(COV)$('#stcov').textContent=$('#cov').textContent;else api('/api/coverage').then(c=>{if(!c.error){setCov(c);$('#stcov').textContent=$('#cov').textContent}});
+  w.querySelectorAll('[data-rq]').forEach(b=>b.onclick=()=>{const x=rec[+b.dataset.rq];$('#q').value=x.q;$('#mode').value=x.mode;$('#mode').onchange();newSearch(x.q,x.mode)});
+  w.querySelectorAll('[data-rg]').forEach(b=>b.onclick=()=>{const g=gs[+b.dataset.rg];$('#q').value='مجموعة: '+g.name;$('#mhelp').textContent=HELP.group+' ('+g.terms.join(' · ')+')';newSearch(g.terms.join('\n'),'group')});
+  w.querySelectorAll('[data-go2]').forEach(b=>b.onclick=()=>show(b.dataset.go2));
+}
+drawStart();
 let FGEN=0;
 async function loadFacet(g){
   const fg=++FGEN;
@@ -1559,9 +1593,10 @@ const PV={b:0,n:0,data:null};
 // عددٌ ومعدودُه: ١ كلمةٌ واحدة · ٢ كلمتان · ٣–١٠ كلمات · ١١ فأكثر كلمةً
 function cnt(n,one,two,few,many){return n==1?one+' واحدة':n==2?two:AR(n)+' '+(n%100>=3&&n%100<=10?few:many)}
 let imgFold=(()=>{try{return localStorage.getItem('bughya-imgfold')=='1'}catch(e){return false}})();
-async function openPage(b,n,img){
-  if(!$('#p-search').classList.contains('on'))show('search');
-  PV.b=b;PV.n=n;PV.data=null;CARD=null;$('#wcard').style.display='none';markCur();setTab('txt');
+async function openPage(b,n,img,auto){
+  const rd=READ;if(!$('#p-search').classList.contains('on'))show('search');READ=rd;setRead();
+  $('#pv').classList.remove('start');
+  PV.b=b;PV.n=n;PV.data=null;CARD=null;$('#wcard').style.display='none';markCur();if(!auto)setTab('txt');
   $('#pvempty').style.display='none';$('#pvwrap').style.display='';
   $('#pvbody').textContent='…';$('#pvfoot').textContent='';$('#pvhead').textContent='';$('#pvnote').textContent='';$('#pvweak').innerHTML='';$('#pvayat').innerHTML='';
   $('#pvimgw').innerHTML='';
@@ -1590,6 +1625,15 @@ async function openPage(b,n,img){
   loadPvToc(p);
   drawAyat(p);
 }
+// تصفّحُ الكتاب وحده (من كتبي أو المسودة أو المدقّق): بلا شريط بحثٍ ولا نتائج، وفي الرأس «رجوع» و«ابحث في هذا الكتاب».
+// والبحثُ وحده: النتائجُ وبجانبها الصفحة. READ = الشاشةُ التي فُتح منها الكتاب، وnull في البحث
+let READ=null;
+const READ_NAME={books:'كتبي',draft:'المسودة',audit:'المدقّق',welcome:'كتبي',status:'كتبي'};
+function readBook(b,n,from){READ=from||'books';openPage(b,n,true)}
+function setRead(){const on=!!READ;$('#p-search').classList.toggle('read',on);
+  document.querySelectorAll('header nav button').forEach(x=>x.classList.toggle('on',x.dataset.p==(on?(NAVOF[READ]||READ):'search')));
+  $('#pvback').style.display=on?'':'none';$('#pvsearch2').style.display=on?'':'none';
+  if(on)$('#pvback span').textContent='رجوع إلى '+(READ_NAME[READ]||'كتبي')}
 // الأعمدة: بلا صفحةٍ مفتوحة لا عمودَ للصورة؛ وما لا صفحاتِ له (وورد ونصوص) أو طواه المستخدم: شريطٌ ضيّقٌ يُفتح منه
 function pvGrid(){
   const g=$('#pv'),p=PV.data,has=!!(p&&p.unit=='صفحة');
@@ -1842,7 +1886,9 @@ $('#pvadd').onclick=()=>{
   addToDraft({kind:'quote',text:q.text,b:p.book_id,n:p.n,cite:p.cite,vol:p.vol,printed:p.printed,unit:p.unit,layer:q.foot?'حاشية':'متن',method:p.method,
     fixes:q.fixes.length?q.fixes:undefined,imgok:q.checked||undefined});
 };
-$('#pvsearch').onclick=()=>{S.books=new Set([PV.b]);setTab('res');$('#q').focus();
+$('#pvback').onclick=()=>show(READ||'books');
+$('#pvsearch2').onclick=()=>$('#pvsearch').click();
+$('#pvsearch').onclick=()=>{if(READ){READ=null;setRead()}S.books=new Set([PV.b]);setTab('res');$('#q').focus();
   if(S.q){S.offset=0;S.results=[];run(false);drawFacet()}else toast('اكتب ما تبحث عنه؛ وسيُحصر في هذا الكتاب')};
 
 // ── المسوّدة: صفحةٌ متّصلة يكتب فيها الباحث، والنقولُ فيها قطعٌ مقفلة بعزوها (تُقابَل بصفحاتها)، وحواشيها تُرقَّم وحدها
@@ -1963,7 +2009,7 @@ function qtOpen(s){
   let top=R.bottom/z+6;if(top+h>H-8)top=Math.max(8,R.top/z-h-6);
   b.style.top=top+'px';b.style.left=Math.max(8,Math.min(R.right/z-w,W-w-8))+'px';
   $('#dqx').onclick=qtClose;
-  if($('#dqopen'))$('#dqopen').onclick=()=>{qtClose();openPage(it.b,it.n,it.method=='ocr')};
+  if($('#dqopen'))$('#dqopen').onclick=()=>{qtClose();readBook(it.b,it.n,'draft')};
   if($('#dqedit'))$('#dqedit').onclick=()=>{$('#dqet').value=it.text;$('#dqe').classList.add('on');$('#dqet').focus()};
   if($('#dqimg'))$('#dqimg').onchange=async e=>{it.imgok=e.target.checked;await checkItem(it);dRefresh(it);saveDrafts();qtOpen(ED.querySelector('.qt[data-id="'+it.id+'"]'))};
   $('#dqdel').onclick=()=>{const nx=s.nextSibling;DUNDO={node:s,parent:s.parentNode,next:nx};
@@ -2140,7 +2186,7 @@ function drawBooks(){
   document.querySelectorAll('[data-bt]').forEach(s=>s.onchange=async()=>{const r=await api('/api/btype',null,{b:+s.dataset.bt,t:s.value});
     if(r.error||!r.ok){toast(r.error||'تعذّر الحفظ');return}const bk=BOOKS.find(x=>x.id==+s.dataset.bt);bk.btype=s.value=='auto'?null:s.value;toast('حُفظ نوع الكتاب')});
   document.querySelectorAll('[data-sb]').forEach(a=>a.onclick=()=>{S.books=new Set([+a.dataset.sb]);show('search');$('#q').focus();toast('اكتب ما تبحث عنه؛ وسيُحصر في هذا الكتاب');if(S.q){S.offset=0;S.results=[];run(false)}});
-  document.querySelectorAll('[data-rd]').forEach(a=>a.onclick=()=>{const b=BOOKS.find(x=>x.id==+a.dataset.rd);openPage(b.id,1,b.unit=='صفحة')});
+  document.querySelectorAll('[data-rd]').forEach(a=>a.onclick=()=>{readBook(+a.dataset.rd,1,'books')});
 }
 $('#bf').oninput=()=>BOOKS&&drawBooks();
 
@@ -2157,7 +2203,7 @@ $('#renx').onclick=()=>$('#ren').classList.remove('on');
 $('#ren').onclick=e=>{if(e.target.id=='ren')$('#ren').classList.remove('on')};
 $('#renimg').onclick=async()=>{$('#ren').classList.remove('on');
   if(!Array.isArray(BOOKS))try{BOOKS=await api('/api/books')}catch(e){}
-  const b=Array.isArray(BOOKS)&&BOOKS.find(x=>x.id==RENB);openPage(RENB,1,!b||b.unit=='صفحة');
+  const from=READ||(($('.panel.on')||{}).id||'p-books').slice(2);from=='search'?openPage(RENB,1,true):readBook(RENB,1,from);
   toast('إذا عرفتَ العنوان فاضغط «بيانات الكتاب» في أعلى العارض')};
 $('#rensave').onclick=async()=>{
   const r=await api('/api/book-set',null,{b:RENB,title:$('#rent').value,author:$('#rena').value,death:$('#rend').value});
@@ -2311,7 +2357,7 @@ function drawAudit(filter){
       '<td>'+esc(it.note&&it.note.text||'')+'</td><td>'+(f.cite?esc(f.cite):(n.near?'<span class="muted">أقربُ ما وُجد: '+esc(String(n.near).slice(0,90))+'</span>':'—'))+'</td>'+
       '<td>'+(bk?'<button class="btn2" data-op="'+bk+','+pg+','+i+'">افتح الصفحة وصورتها</button>':'')+'</td></tr>'}).join('')+'</tbody></table></div>';
   document.querySelectorAll('[data-vf]').forEach(a=>a.onclick=()=>drawAudit(a.dataset.vf));if($('#vall'))$('#vall').onclick=()=>drawAudit();
-  document.querySelectorAll('[data-op]').forEach(b=>b.onclick=()=>{const [bk,pg,i]=b.dataset.op.split(',');S.q=(items[+i].quote||'').slice(0,80);S.mode='phrase';openPage(+bk,+pg,true)});
+  document.querySelectorAll('[data-op]').forEach(b=>b.onclick=()=>{const [bk,pg,i]=b.dataset.op.split(',');S.q=(items[+i].quote||'').slice(0,80);S.mode='phrase';readBook(+bk,+pg,'audit')});
   $('#axl').onclick=async()=>{const x=await api('/api/tadqiq/xlsx',{id:AJOB});if(x.error){toast(x.error);return}toast('حُفظ في التنزيلات: '+x.name)};
 }
 $('#exopen').onclick=async()=>{const b=$('#exbox');if(b.style.display=='block'){b.style.display='none';return}b.style.display='block';EX=await api('/api/exclusions');drawEx()};
