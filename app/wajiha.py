@@ -1772,7 +1772,7 @@ $('#gmeasure').onclick=async()=>{const t=$('#gterms').value.trim();if(!t)return;
 // ── الكتب
 let BOOKS=null;
 const STATE={done:'قُرئ',reading:'يُقرأ',pending:'ينتظر',error:'تعذّر',unsupported:'لا يُقرأ',empty:'لا نصّ',missing:'مفقود',duplicate:'مكرَّر'};
-async function loadBooks(){$('#btab').innerHTML='<div class="wait">تُحمَّل الكتب…</div>';BOOKS=await api('/api/books');
+async function loadBooks(){$('#btab').innerHTML='<div class="wait">الكتبُ تُحمَّل…</div>';BOOKS=await api('/api/books');
   if(BOOKS.error){$('#btab').innerHTML='<div class="err">'+esc(BOOKS.error)+'</div>';BOOKS=null;return}drawBooks()}
 function how(b){
   let h='';
