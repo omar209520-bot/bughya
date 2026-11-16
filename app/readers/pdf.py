@@ -25,6 +25,7 @@ TOOL_MARKERS = ("microsoft word", "acdsee", "proprint", "acrobat", "scanner", "u
 OCR_LONG_SIDE = 3000       # طولُ الصورة المقروءة آليًّا بالنقاط الضوئيّة (سَبْر الوارث قاس ١٨٠٠ فرفعها لدقّة الطباعة القديمة)
 TEXT_LAYER_MIN = 0.88     # دون هذا التوافقِ مع القراءة الآليّة يُعدّ نصُّ الملفّ معيبًا
 MUSHAF_ZOOM = 6.0          # تكبيرُ موضع خطّ المصحف للقراءة الآليّة (قيس على الصفحة 03: ٤ و٨ أسوأ)
+HIDDEN_COVER = 0.8         # صورةٌ تغطّي هذا القدرَ من الصفحة فأكثر: صفحةٌ مصوَّرة (hidden_scan)
 MIN_LETTERS = 25           # أقلُّ من هذا في نصّ الملفّ: الصفحةُ مصوَّرة
 
 
@@ -108,9 +109,14 @@ class PdfBook:
         self.scanned_guess = kind == "image" or self._guess_scanned()
         self.bias = [0, 0, 0] if self.scanned_guess else sample_bias(self.doc, fitz, self.total)
         self.force_ocr = False
+        self._hidden = 0
         if kind == "pdf" and not self.scanned_guess and ocr is not None and ocr.ok:
             score = self._text_layer_score()
-            if score is not None and score < TEXT_LAYER_MIN:
+            if score is None and self._hidden:
+                # صفحاتُ العيّنة كلُّها مصوَّرةٌ تحت طبقة قراءةٍ آليّةٍ قديمةٍ خفيّة: كتابٌ مصوَّر، تُقرأ صورُه
+                self.force_ocr, self.scanned_guess = True, True
+                self.hints["note"] = "صفحاتُه مصوَّرةٌ تحت نصٍّ خفيٍّ من قراءةٍ آليّةٍ قديمة، فقُرئت صورُها آليًّا"
+            elif score is not None and score < TEXT_LAYER_MIN:
                 # نصُّ الملف المضمَّن معيب (حروفٌ ناقصة أو مقطَّعة، كما في ملفّاتٍ حُفظت من وورد): تُقرأ صورةُ كلّ صفحة بدله
                 self.force_ocr, self.scanned_guess = True, True
                 self.hints["note"] = "نصُّ الملفّ المضمَّن معيب (توافقُه مع الصورة %d٪) فقُرئت صفحاتُه آليًّا" % round(score * 100)
@@ -125,6 +131,9 @@ class PdfBook:
             i = min(self.total - 1, int(self.total * f))
             try:
                 page = self.doc[i]
+                if hidden_scan(page, fitz):     # تُقرأ صورتُها وحدها في كلّ حال، فلا تشهد على نصّ الكتاب
+                    self._hidden += 1
+                    continue
                 lines, _ = best_lines(page, fitz, self.bias)
                 mine = [w for w in arabic.normalize(" ".join(l["t"] for l in lines)).split() if len(w) > 1]
                 if len(mine) < 30:
@@ -180,6 +189,8 @@ class PdfBook:
         raw = "\n".join(l["t"] for l in lines)
         q = arabic.quality(raw)
         needs_ocr = self.kind == "image" or q["letters"] < MIN_LETTERS or arabic.is_garbage(q) or self.force_ocr
+        if not needs_ocr and self.kind == "pdf" and hidden_scan(page, fitz):
+            needs_ocr = True        # صفحةٌ مصوَّرةٌ تحت نصٍّ خفيّ، ولو كان الكتابُ نصّيًّا
         # تعذّر بناءُ السطر في كتابٍ تغلب فيه الصيغةُ المبنيّة: فنصُّه كما هو معيبٌ (مركّباتٌ معكوسة)، والقراءةُ الآليّة أصدق
         if self.last_variant == "تعذّر البناء" and max(self.bias[1], self.bias[2]) > self.bias[0]:
             needs_ocr = True
@@ -323,6 +334,25 @@ class PdfBook:
 # لفظُ الجلالة في ملفّات وورد: يُرسم بحرفٍ مركّب يُحفظ في نصّ الملفّ «للا» بلا هاء، فيُقرأ «اللَ».
 # و«الل» ليست كلمةً عربيّة، فلا تأتي إلّا من هذا: تُردّ الهاء (وما قبلها من حرف عطفٍ أو جرّ أو قسَمٍ يبقى)
 _ALLAH = __import__("re").compile(r"(?<![ء-ي])([وفبت]{0,2}الل)([ً-ْ]*)(?![ء-يً-ْ])")
+
+
+def hidden_scan(page, fitz) -> bool:
+    """صفحةٌ مصوَّرةٌ تحت طبقة قراءةٍ آليّةٍ قديمةٍ خفيّة: صورةٌ تغطّي أكثرَ الصفحة، وأكثرُ حروف نصّها لا يُرسم (نمطُ الرسم 3).
+    نصُّها ليس ما في الصفحة بل ما قرأه برنامجٌ آخر، وقد يكون حروفًا لاتينيّةً لا معنى لها، فتُقرأ صورتُها.
+    قيس على كلّ صفحات مكتبة المجرّب: 466 صفحةً في ثلاثة كتب، ولا صفحةَ في كتابٍ نصّيٍّ سليم."""
+    try:
+        area = abs(page.rect) or 1
+        if not any(abs(fitz.Rect(im["bbox"]) & page.rect) / area > HIDDEN_COVER for im in page.get_image_info()):
+            return False
+        chars = hidden = 0
+        for sp in page.get_texttrace():
+            n = sum(1 for c in sp["chars"] if c[0] > 32)
+            chars += n
+            if sp.get("type") == 3 or sp.get("opacity", 1) == 0:
+                hidden += n
+        return chars > 0 and hidden / chars > 0.5
+    except Exception:
+        return False
 
 
 def fix_allah(t: str) -> str:

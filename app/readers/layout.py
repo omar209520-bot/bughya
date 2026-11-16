@@ -124,6 +124,8 @@ def _arabic_share(t: str) -> float:
 
 
 _JOINT = set("/()[].:،؛-")
+_EDGE_MARKS = re.compile("[ً-ْٰـ]+$")
+_LEAD_MARKS = re.compile("^[ً-ْٰـ]+")
 
 
 def _glued(prev: dict, p: dict, gap: float, text: str, rtl: bool = True) -> bool:
@@ -132,6 +134,12 @@ def _glued(prev: dict, p: dict, gap: float, text: str, rtl: bool = True) -> bool
     أن يكون أحدُ الطرفين قصيرًا لا يقوم كلمةً وحده (حرفًا أو حرفين، أو «ال» وبعدها حرفان على الأكثر)؛ ولا يُضمّ ما بعد
     «ة» أو «ى» (آخرُ الكلمة)، ولا ما يبدأ بـ«ال» بعد كلمةٍ تامّة، ولا كلمةٌ شائعة («في»، «قد»)، ولا «و» وحدها بعد كلمة."""
     if "sp" not in prev or "sp" not in p or not text or not p["t"]:
+        return False
+    # الحركةُ عند موضع الالتقاء لا تمنع الضمّ: ملفّاتُ وورد تقطع الكلمة بعد حركتها («ويتقدَّ» + «س»، «النظ» + «ر»).
+    # فيُحكم على الحرفين وراءها. قيس: 103 مواضع في كتب المجرّب النصّيّة، كلُّها كلمةٌ واحدةٌ مقسومة
+    text = _EDGE_MARKS.sub("", text)
+    p = dict(p, t=_LEAD_MARKS.sub("", p["t"]))
+    if not text or not p["t"]:
         return False
     if "spl" in prev and "spl" in p:        # المسافةُ التي في الملف عند موضع الالتقاء وحده تمنع الضمّ، لا التي في الطرف الآخر
         if (prev["spl"] or p["spr"]) if rtl else (prev["spr"] or p["spl"]):
