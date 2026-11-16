@@ -131,6 +131,37 @@ def main() -> int:
                and lexicon.doubt("فال", None, "الله") and not lexicon.doubt("فال")
                and row[0]["d"] and row[0]["c"] and not row[1]["d"],
                "الكلمةُ المعروفة الغريبةُ بين جارتيها تُعلَّم بالسياق", "%s %s" % (m, row))
+        report(row[0].get("a") == "قال" and row[0].get("with") == "الله" and "a" not in row[1]
+               and lexicon.suggest("فالَ:", (0, "ق", "بعد")) == "قالَ:",
+               "اقتراحُ القاموس للكلمة الغريبة يصل إلى الصفحة بحروف الكلمة كما قُرئت", str(row))
+
+        # تصحيحُ المستخدم يُحفظ منفصلًا (tashih)، ولا يمسّ نصَّ الكتاب، وتقابل به البوّابةُ النقلَ في المسودة
+        import musawwada
+        import tashih
+        con5 = store.connect(readonly=True)
+        bk = con5.execute("SELECT * FROM books WHERE state = 'done' AND kind = 'txt' ORDER BY id LIMIT 1").fetchone()
+        pg = store.page(con5, bk["id"], 1)
+        con5.close()
+        ws_ = pg["body"].split()
+        k = next(i for i in range(2, len(ws_) - 2) if len(ws_[i]) >= 3 and ws_[i].isalpha())
+        orig = ws_[k]
+        r1 = wajiha.api_fix({"b": bk["id"], "n": 1, "layer": "body", "i": k, "orig": orig, "kind": "fix", "fixed": "مصحَّحة"})
+        bad = wajiha.api_fix({"b": bk["id"], "n": 1, "layer": "body", "i": k, "orig": "كلمةٌليستفيالصفحة", "kind": "ok"})
+        flat = [{"t": t} for t in ws_]
+        stale = tashih.apply(flat, tashih.page(bk, 1), "body")
+        con5 = store.connect(readonly=True)
+        same = store.page(con5, bk["id"], 1)["body"] == pg["body"]
+        con5.close()
+        quote = " ".join(ws_[k - 2:k] + ["مصحَّحة"] + ws_[k + 1:k + 3])
+        with_fix = musawwada.check({"b": bk["id"], "n": 1, "text": quote, "fixes": [{"o": orig, "x": "مصحَّحة"}]})
+        without = musawwada.check({"b": bk["id"], "n": 1, "text": quote})
+        undo = wajiha.api_fix({"b": bk["id"], "n": 1, "layer": "body", "i": k, "orig": orig, "undo": 1})
+        report(r1.get("ok") and "error" in bad and flat[k].get("x") == "مصحَّحة" and not stale and same
+               and with_fix["verdict"].startswith("مطابق") and "بتصحيحك" in with_fix["vnote"]
+               and without["verdict"] == "غيرُ مطابق" and undo.get("ok") and not tashih.page(bk, 1)
+               and tashih.PATH.parent == common.DATA,
+               "تصحيحُ الكلمة يُحفظ منفصلًا ولا يمسّ نصَّ الكتاب، والبوّابةُ تقابل به",
+               "%s %s %s %s %s" % (r1, bad, flat[k], with_fix, without))
         lexicon.PAIRS.unlink()
         m = lexicon.marks("فال الله سبحانه ززززز".split())
         report(m == [0, 0, 0, 1] and not lexicon.doubt("فال", None, "الله"),

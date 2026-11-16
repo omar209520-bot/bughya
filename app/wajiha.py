@@ -151,15 +151,40 @@ def _align(text: str, ws: list, doubt: bool) -> list:
             for k in range(i2 - i1):
                 boxes[i1 + k] = ws[j1 + k][1:]
     # 1 لا يعرفها القاموس، 2 يعرفها وهي غريبةٌ بين جارتيها ولها بديلٌ في النقط يناسبهما (lexicon.marks)
-    mk = lexicon.marks(flat) if doubt else [0] * len(flat)
+    alts = [None] * len(flat)
+    mk = lexicon.marks(flat, alts=alts) if doubt else [0] * len(flat)
+    has = lambda t: any("ء" <= ch <= "ي" for ch in t)
     out, k = [], 0
     for l in lines:
         row = []
         for t in l:
-            row.append({"t": t, "b": boxes[k], "d": bool(mk[k]), "c": mk[k] == 2})
+            w = {"t": t, "b": boxes[k], "d": bool(mk[k]), "c": mk[k] == 2}
+            if alts[k]:
+                # اقتراحُ القاموس، والجارةُ التي ورد معها البديلُ في كتب المستخدم (لا عددَ: الفهرسُ لا يحفظه)
+                side = alts[k][2]
+                j = k - 1 if side == "قبل" else k + 1
+                while 0 <= j < len(flat) and not has(flat[j]):
+                    j += -1 if side == "قبل" else 1
+                w["a"] = lexicon.suggest(t, alts[k])
+                if 0 <= j < len(flat):
+                    w["with"], w["side"] = flat[j], side
+            row.append(w)
             k += 1
         out.append(row)
     return out
+
+
+def _fixes(p, res: dict) -> None:
+    """تصحيحاتُ المستخدم (tashih) فوق كلمات الصفحة: لا يتغيّر نصُّ الكتاب، ويُعرض التصحيحُ معلَّمًا بأنّه منه."""
+    import store
+    import tashih
+    con = store.connect(readonly=True)
+    try:
+        b = store.book(con, p["book_id"])
+    finally:
+        con.close()
+    rows = tashih.page(b, p["n"]) if b is not None else []
+    res["stale"] = sum(tashih.apply([w for l in res.get(key) or [] for w in l], rows, key) for key in ("body", "foot"))
 
 
 def _repaired(book_id: int) -> bool:
@@ -196,6 +221,7 @@ def api_words(q: dict):
         res = {"words": True, "lexicon": doubt, "text": True}
         for key in ("body", "foot"):
             res[key] = _align(p[key], [], doubt)
+        _fixes(p, res)
         return res
     if not any(bx.get("ws") for bx in boxes):     # قُرئ بإصدارٍ قبل حفظ مواضع الكلمات
         return {"words": False, "old": True}
@@ -204,7 +230,36 @@ def api_words(q: dict):
     for key, lay in (("body", "b"), ("foot", "f")):
         ws = [w for bx in boxes if bx.get("l") == lay for w in (bx.get("ws") or [])]
         res[key] = _align(p[key], ws, doubt)
+    _fixes(p, res)
     return res
+
+
+def api_fix(body: dict) -> dict:
+    """يحفظ تصحيحَ كلمةٍ (أو أنّها صحيحة) في ملفّ التصحيحات، أو يلغيه (undo). نصُّ الكتاب في المخزن لا يُمسّ."""
+    import store
+    import tashih
+    try:
+        b, n, idx = int(body["b"]), int(body["n"]), int(body["i"])
+    except (KeyError, TypeError, ValueError):
+        return {"error": "طلبٌ ناقص."}
+    layer = body.get("layer")
+    con = store.connect(readonly=True)
+    try:
+        book, pg = store.book(con, b), store.page(con, b, n)
+    finally:
+        con.close()
+    if book is None or pg is None:
+        return {"error": "لا صفحةَ بهذا الرقم."}
+    if body.get("undo"):
+        return tashih.remove(book, n, layer, idx)
+    words = (pg[layer] or "").split() if layer in ("body", "foot") else []
+    orig = str(body.get("orig") or "")
+    if orig not in words:              # الكلمةُ كما قُرئت يجب أن تكون في نصّ الصفحة نفسه
+        return {"error": "الكلمةُ ليست في نصّ هذه الصفحة؛ أعد فتح الصفحة."}
+    try:
+        return tashih.save(book, n, layer, idx, orig, body.get("kind") or "fix", body.get("fixed"))
+    except ValueError as e:
+        return {"error": str(e)}
 
 
 def api_groups_get(q: dict):
@@ -761,6 +816,7 @@ POST = {
     "/api/draft/check": api_draft_check,
     "/api/draft/docx": api_draft_docx,
     "/api/draft/pdf": api_draft_pdf,
+    "/api/fix": api_fix,
 }
 
 
@@ -1100,6 +1156,18 @@ mark{background:var(--mark);color:inherit;padding:0 2px;border-radius:2px}
 #pv .wd{cursor:pointer;border-radius:2px}#pv .wd:hover{background:var(--acc2)}
 #pv .wd.dq{text-decoration:underline wavy var(--doubt);text-underline-offset:6px}
 #pv .wd.on{background:var(--mark);outline:1.5px solid var(--doubt)}
+#pv .wd.fx{text-decoration:underline solid var(--fixed) 2px;text-underline-offset:7px}
+#wcard{border:1.5px solid var(--doubt);border-radius:10px;background:var(--card);padding:12px 16px 10px;margin:10px 0 4px;font-size:14px}
+.wtop{display:flex;align-items:flex-start;gap:10px}.wtop b{font:700 22px/1.4 var(--text);color:var(--doubt);white-space:nowrap}
+.wtop .wwhy{flex:1;padding-top:4px;line-height:1.6}.wtop .ibtn{width:28px;height:28px;font-size:13px}
+.wrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}
+.wclip{display:inline-flex;border:1px solid var(--line);border-radius:6px;padding:3px;background:#fff;min-height:30px;min-width:60px;align-items:center;justify-content:center}
+.wclip canvas{display:block;max-width:100%}
+.wsug{font:700 20px/1.3 var(--text);border:1.5px solid var(--fixed);color:var(--fixed);background:var(--acc2);border-radius:8px;padding:3px 16px;cursor:pointer}
+.wfix input{flex:1 1 180px;min-width:0;font:20px/1.4 var(--text);padding:5px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+.wfix .btn{border-radius:8px;padding:6px 20px}
+.wfoot{margin-top:10px;font-size:12.5px;line-height:1.7;color:var(--mute)}
+.tag.fixt{color:var(--fixed);border-color:var(--fixed)}
 #pvayat h3{font:600 15px var(--ui);margin:18px 0 2px;padding-top:12px;border-top:1px solid var(--line)}
 .ayb{padding:9px 0;border-bottom:1px solid var(--line)}
 .ay{margin:4px 0}.aytxt{font:22px/1.9 var(--text)}.ay b{font-size:13px;color:var(--rub);white-space:nowrap}
@@ -1292,6 +1360,7 @@ header .ver button{background:none;border:0;color:#e9e2c8;font:12px var(--ui);cu
 <button type="button" id="pvren"><svg class="i"><use href="#i-doc"/></svg>بيانات الكتاب</button></div></span></div>
 <div class="head" id="pvhead"></div><div id="pvweak"></div><div class="note" id="pvnote"></div><div class="txt" id="pvbody"></div>
 <div class="pvacts"><button type="button" class="btn3 gold" id="pvadd">+ أضف الصفحة إلى المسودة</button><button type="button" class="btn3" id="pvcopy"><svg class="i"><use href="#i-copy"/></svg><span>انسخ الصفحة بالعزو</span></button><span id="pvmeth" class="tag"></span></div>
+<div id="wcard" style="display:none" role="dialog" aria-label="الكلمة وتصحيحها"></div>
 <div class="foot" id="pvfoot"></div><div id="pvayat"></div></div></section>
 <aside id="imgcol"><div class="chd"><b>صورة الصفحة</b><button type="button" class="ibtn zbtn" id="zimgout" title="صغّر الصورة" aria-label="صغّر الصورة"><svg class="i"><use href="#i-zout"/></svg></button><button type="button" class="ibtn zbtn" id="zimgin" title="كبّر الصورة" aria-label="كبّر الصورة"><svg class="i"><use href="#i-zin"/></svg></button><button type="button" class="ibtn" id="imgfold" title="اطوِ الصورة فيتّسع النصّ" aria-label="اطوِ الصورة"><svg class="i"><use href="#i-fold"/></svg></button></div>
 <div id="pvimgw"></div></aside>
@@ -1482,7 +1551,7 @@ function cnt(n,one,two,few,many){return n==1?one+' واحدة':n==2?two:AR(n)+' 
 let imgFold=(()=>{try{return localStorage.getItem('bughya-imgfold')=='1'}catch(e){return false}})();
 async function openPage(b,n,img){
   if(!$('#p-search').classList.contains('on'))show('search');
-  PV.b=b;PV.n=n;PV.data=null;markCur();setTab('txt');
+  PV.b=b;PV.n=n;PV.data=null;CARD=null;$('#wcard').style.display='none';markCur();setTab('txt');
   $('#pvempty').style.display='none';$('#pvwrap').style.display='';
   $('#pvbody').textContent='…';$('#pvfoot').textContent='';$('#pvhead').textContent='';$('#pvnote').textContent='';$('#pvweak').innerHTML='';$('#pvayat').innerHTML='';
   $('#pvimgw').innerHTML='';
@@ -1545,45 +1614,112 @@ async function loadPvToc(p){
 }
 $('#pvtocb').addEventListener('click',()=>{const c=$('#pvtoc .cur');if(c)setTimeout(()=>c.scrollIntoView({block:'nearest'}),0)});
 let PVW=null;
-async function drawWords(p){
-  PVW=null;const r=await api('/api/words',{b:p.book_id,n:p.n});
+async function drawWords(p,keep){
+  const r=await api('/api/words',{b:p.book_id,n:p.n});
   if(PV.n!=p.n||PV.b!=p.book_id)return;
-  if(!r.words){if(r.old){const n=document.createElement('div');n.className='note';n.textContent='قُرئ هذا الكتاب بإصدارٍ أقدم من «بُغية»، فلا تظهر فيه مواضعُ الكلمات في الصورة ولا تعليمُ المشكوك فيها. أعد قراءتَه لتظهر.';const bt=document.createElement('button');bt.className='btn2';bt.textContent='أعد قراءة هذا الكتاب';bt.onclick=async()=>{const x=await api('/api/reread-book',null,{b:p.book_id});toast(x.error||'بدأت إعادةُ القراءة');pollProgress()};n.appendChild(document.createTextNode(' '));n.appendChild(bt);$('#pvnote').appendChild(n);}return;}
-  PVW=r;let doubts=0;const SRC=r.text?'خطأً في بناء نصّ الملفّ':'خطأً في القراءة الآلية';
-  const render=lines=>{const sp=lineSeps(lines.map(l=>l.map(w=>w.t).join(' ')));
-    return lines.map((l,i)=>l.map(w=>{if(w.d)doubts++;
-    return '<span class="wd'+(w.d?' dq" title="'+(w.c?'في قاموس كتبك، لكنّها لم ترد فيها بجوار ما حولها، وورد مكانَها ما يخالفها في النقط؛ فقد تكون '+SRC+': قابلها بالصورة':'ليست في قاموس كتبك، فقد تكون '+SRC+': قابلها بالصورة'):'')+'"'+(w.b?' data-b="'+w.b.join(',')+'"':'')+'>'+esc(w.t)+'</span>'}).join(' ')+(i<lines.length-1?sp[i]:'')).join('')};
-  $('#pvbody').innerHTML=render(r.body||[]);
-  if(r.foot&&r.foot.length&&p.foot)$('#pvfoot').innerHTML='<b>الحاشية:</b>\n'+render(r.foot);
-  document.querySelectorAll('#pv .wd[data-b]').forEach(s=>s.onclick=()=>showWord(s));
-  const n=document.createElement('div');n.className='note';
-  n.textContent=r.text?(!r.lexicon?'':doubts?('نصُّ هذا الملفّ أُعيد بناؤه من خطّه، وقد يخطئ البناء. و'+AR(doubts)+' كلمةً تحتها خطٌّ متموّجٌ برتقاليّ: ليست في قاموس كتبك، أو هي فيه لكنّها غريبةٌ بين جارتيها؛ فقابلها بصورة الصفحة قبل نقلها. وما لا خطَّ تحته قد يكون خاطئًا أيضًا.')
+  if(!keep)PVW=null;
+  const old=$('#pvwnote');if(old)old.remove();
+  if(!r.words){if(r.old){const n=document.createElement('div');n.className='note';n.id='pvwnote';n.textContent='قُرئ هذا الكتاب بإصدارٍ أقدم من «بُغية»، فلا تظهر فيه مواضعُ الكلمات في الصورة ولا تعليمُ المشكوك فيها. أعد قراءتَه لتظهر.';const bt=document.createElement('button');bt.className='btn2';bt.textContent='أعد قراءة هذا الكتاب';bt.onclick=async()=>{const x=await api('/api/reread-book',null,{b:p.book_id});toast(x.error||'بدأت إعادةُ القراءة');pollProgress()};n.appendChild(document.createTextNode(' '));n.appendChild(bt);$('#pvnote').appendChild(n);}return;}
+  PVW=r;let doubts=0,fixed=0,oked=0;const SRC=r.text?'خطأً في بناء نصّ الملفّ':'خطأً في القراءة الآلية';
+  const render=(lines,lay)=>{const sp=lineSeps(lines.map(l=>l.map(w=>w.x||w.t).join(' ')));
+    return lines.map((l,i)=>l.map(w=>{if(w.d){doubts++;if(w.x)fixed++;else if(w.ok)oked++}
+    const cls=w.x?' fx':w.ok?' okw':w.d?' dq':'';
+    const tip=w.x?'صحّحتَها من الصورة · قُرئت: «'+w.t+'»':w.ok?'أقررتَها صحيحةً كما قُرئت':w.d?(w.c?'في قاموس كتبك، لكنّها لم ترد فيها بجوار ما حولها، وورد مكانَها ما يخالفها في النقط؛ فقد تكون '+SRC+': قابلها بالصورة':'ليست في قاموس كتبك، فقد تكون '+SRC+': قابلها بالصورة'):'';
+    return '<span class="wd'+cls+'" data-l="'+lay+'" data-i="'+w.i+'"'+(tip?' title="'+esc(tip)+'"':'')+(w.b?' data-b="'+w.b.join(',')+'"':'')+'>'+esc(w.x||w.t)+'</span>'}).join(' ')+(i<lines.length-1?sp[i]:'')).join('')};
+  $('#pvbody').innerHTML=render(r.body||[],'body');
+  if(r.foot&&r.foot.length&&p.foot)$('#pvfoot').innerHTML='<b>الحاشية:</b>\n'+render(r.foot,'foot');
+  document.querySelectorAll('#pv .wd').forEach(s=>s.onclick=e=>{if(!String(getSelection()).trim())openCard(s)});
+  const n=document.createElement('div');n.className='note';n.id='pvwnote';
+  n.textContent=(r.text?(!r.lexicon?'':doubts?('نصُّ هذا الملفّ أُعيد بناؤه من خطّه، وقد يخطئ البناء. و'+AR(doubts)+' كلمةً تحتها خطٌّ متموّجٌ برتقاليّ: ليست في قاموس كتبك، أو هي فيه لكنّها غريبةٌ بين جارتيها؛ فقابلها بصورة الصفحة قبل نقلها. وما لا خطَّ تحته قد يكون خاطئًا أيضًا.')
     :'نصُّ هذا الملفّ أُعيد بناؤه من خطّه، ولم تُعلَّم كلمةٌ في هذه الصفحة؛ وهذا لا يعني أنّها كلَّها صواب.')
     :!r.lexicon?'اضغط أي كلمة لترى موضعها في الصورة. (تعليم الكلمات المشكوك فيها يحتاج كتبًا نصيّة أكثر في مكتبتك.)'
     :doubts?('اضغط أي كلمة لترى موضعها في الصورة. و'+AR(doubts)+' كلمةً تحتها خطٌّ متموّجٌ برتقاليّ، وتُؤطَّر في الصورة: ليست في قاموس كتبك، أو هي فيه لكنّها غريبةٌ بين جارتيها؛ فقد تكون خطأً في القراءة الآلية، فقابلها بالصورة قبل نقلها. وما لا خطَّ تحته قد يكون خاطئًا أيضًا.')
-    :'اضغط أي كلمة لترى موضعها في الصورة. ولم تُعلَّم كلمةٌ في هذه الصفحة: كلُّها في قاموس كتبك وليس فيها ما يُستغرب موضعُه، وهذا لا يعني أنّها كلَّها صواب.';
+    :'اضغط أي كلمة لترى موضعها في الصورة. ولم تُعلَّم كلمةٌ في هذه الصفحة: كلُّها في قاموس كتبك وليس فيها ما يُستغرب موضعُه، وهذا لا يعني أنّها كلَّها صواب.')+
+    ' واضغط كلمةً لتصحّحها من الصورة: يُحفظ تصحيحُك منفصلًا ويبقى نصُّ الكتاب كما قُرئ.'+
+    (r.stale?' ('+AR(r.stale)+' من تصحيحاتك السابقة في هذه الصفحة لم يُطبَّق: تغيّر نصُّها بعد إعادة قراءتها.)':'');
   $('#pvnote').appendChild(n);
-  drawWeak(r,doubts);
-  drawImgBoxes();
+  drawWeak(r,doubts,fixed,oked);
+  drawImgBoxes((document.querySelector('#pv .wd.on')||{}).dataset?.b);
 }
 // «قراءة هذه الصفحة ضعيفة»: إذا بلغ المعلَّمُ WEAK_SHARE من كلمات الصفحة، وWEAK_MIN كلماتٍ على الأقلّ (الحدُّ في أوّل wajiha.py)
 const WEAK_SHARE=__WEAK_SHARE__,WEAK_MIN=__WEAK_MIN__;
-function drawWeak(r,doubts){
+function drawWeak(r,doubts,fixed,oked){
   const all=[...(r.body||[]),...(r.foot||[])].flat().filter(w=>/[ء-ي]/.test(w.t)).length;
   const w=$('#pvweak');w.innerHTML='';
   if(!all||doubts<WEAK_MIN||doubts/all<WEAK_SHARE)return;
+  const done=(fixed?'، صحّحتَ منها '+(fixed==1?'واحدة':cnt(fixed,'','اثنتين','','')):'')+(oked?(fixed?' وأقررتَ ':'، أقررتَ منها ')+(oked==1?'واحدة':cnt(oked,'','اثنتين','',''))+' كما هي':'');
   w.innerHTML='<div class="weak"><svg class="i"><use href="#i-warn"/></svg><span>'+(r.text?'نصُّ هذه الصفحة معيب':'قراءةُ هذه الصفحة ضعيفة')+': '+
-    cnt(doubts,'كلمةٌ','كلمتان','كلماتٍ','كلمةً')+' مشكوكٌ فيها من '+AR(all)+'. اعتمد على الصورة قبل النقل.</span>'+
+    cnt(doubts,'كلمةٌ','كلمتان','كلماتٍ','كلمةً')+' مشكوكٌ فيها من '+AR(all)+done+'. اعتمد على الصورة قبل النقل.</span>'+
     '<button type="button" class="btn3" id="wnext">الكلمة التالية ←</button></div>';
-  let k=-1;
-  $('#wnext').onclick=()=>{const ws=[...document.querySelectorAll('#pv .wd.dq')];if(!ws.length)return;k=(k+1)%ws.length;const s=ws[k];
-    s.scrollIntoView({block:'center',behavior:'smooth'});if(s.dataset.b)showWord(s);else{document.querySelectorAll('#pv .wd.on').forEach(x=>x.classList.remove('on'));s.classList.add('on')}};
+  // الكلمةُ المشكوكُ فيها التالية لم يُحكم عليها، بعد المفتوحة الآن
+  $('#wnext').onclick=()=>{const ws=[...document.querySelectorAll('#pv .wd.dq')];if(!ws.length){toast('حكمتَ على كلّ المشكوك فيه في هذه الصفحة');return}
+    const cur=$('#pv .wd.on'),all=[...document.querySelectorAll('#pv .wd')],at=cur?all.indexOf(cur):-1;
+    const s=ws.find(x=>all.indexOf(x)>at)||ws[0];s.scrollIntoView({block:'center',behavior:'smooth'});openCard(s)};
 }
 async function showWord(s){
   document.querySelectorAll('#pv .wd.on').forEach(x=>x.classList.remove('on'));s.classList.add('on');
-  if(!imgFold&&!$('#pvimgw img'))await showImg();
+  if(!imgFold&&PV.data&&PV.data.unit=='صفحة'&&!$('#pvimgw img'))await showImg();
   drawImgBoxes(s.dataset.b);
 }
+// ── بطاقةُ الكلمة: تظهر بضغط كلمة، وتُخفى بضغط مكانٍ فارغ أو زرّ الإغلاق. التصحيحُ يُحفظ منفصلًا (tashih)، ونصُّ الكتاب لا يُمسّ
+function wordOf(s){const L=PVW&&PVW[s.dataset.l];if(!L)return null;for(const l of L)for(const w of l)if(w.i==+s.dataset.i)return w;return null}
+let CARD=null;
+function closeCard(){$('#wcard').style.display='none';$('#wcard').innerHTML='';CARD=null;document.querySelectorAll('#pv .wd.on').forEach(x=>x.classList.remove('on'));drawImgBoxes()}
+async function openCard(s){
+  const w=wordOf(s);if(!w||!PV.data)return;CARD={s,w,l:s.dataset.l};
+  showWord(s);
+  const c=$('#wcard'),ocr=PV.data.method=='ocr',SRC=PVW.text?'خطأً في بناء نصّ الملفّ':'خطأً في القراءة الآليّة';
+  let why='',sug='';
+  if(w.x)why='صحّحتَها من الصورة؛ وقُرئت «'+esc(w.t)+'».';
+  else if(w.ok)why='أقررتَها صحيحةً كما قُرئت.';
+  else if(w.d&&w.c)why='في قاموس كتبك، لكنّها غريبةٌ '+(w.with?(w.side=='قبل'?'بعد':'قبل')+' «'+esc(w.with)+'»':'بين جارتيها')+'؛ فقد تكون '+SRC+'.';
+  else if(w.d)why='ليست في قاموس كتبك؛ فقد تكون '+SRC+'.';
+  if(w.a&&!w.x&&!w.ok)sug='<div class="wrow"><span class="muted">اقتراحُ القاموس:</span><button type="button" class="wsug" id="wsug">'+esc(w.a)+'</button>'+
+    (w.with?'<span class="muted">ورد «'+esc(w.side=='قبل'?w.with+' '+w.a:w.a+' '+w.with)+'» في كتبك</span>':'')+'</div>';
+  const marked=w.d&&!w.x&&!w.ok;
+  c.innerHTML='<div class="wtop"><b>«'+esc(w.x||w.t)+'»</b><span class="wwhy">'+why+'</span><button type="button" class="ibtn" id="wclose" title="أغلق" aria-label="أغلق">✕</button></div>'+
+    (w.b?'<div class="wrow"><span class="muted">في الصورة:</span><span class="wclip" id="wclip"><span class="muted">…</span></span></div>':
+      (PVW.text?'<div class="wrow muted">لا موضعَ لهذه الكلمة في الصورة (نصُّ الملفّ لا يحفظ مواضعَ كلماته): قابِلها بصورة الصفحة بعينك.</div>':''))+
+    sug+
+    '<div class="wrow wfix"><input type="text" id="wfin" dir="rtl" placeholder="'+(w.a&&!w.x&&!w.ok?'أو اكتب الصحيح كما في الصورة…':'اكتب الصحيح كما في الصورة…')+'" value="'+esc(w.x||'')+'">'+
+    '<button type="button" class="btn" id="wsave">اعتمد</button>'+
+    (marked?'<button type="button" class="btn3" id="wok">هي صحيحة</button>':'')+
+    (w.x||w.ok?'<button type="button" class="btn3" id="wundo">ألغِ '+(w.x?'التصحيح':'الإقرار')+'</button>':'')+'</div>'+
+    '<div class="wfoot">الاقتراحُ لا يُطبَّق وحده: قابِله بالصورة ثمّ اعتمده. ونصُّ الكتاب كما قُرئ يبقى محفوظًا، وتصحيحُك يُعلَّم بأنّه منك.</div>';
+  c.style.display='block';
+  $('#wclose').onclick=closeCard;
+  if($('#wsug'))$('#wsug').onclick=()=>{$('#wfin').value=w.a;$('#wfin').focus()};
+  $('#wfin').onkeydown=e=>{e.stopPropagation();if(e.key=='Enter'){e.preventDefault();$('#wsave').click()}else if(e.key=='Escape')closeCard()};
+  $('#wsave').onclick=()=>{const v=$('#wfin').value.trim();if(!v){toast('اكتب الكلمةَ كما في الصورة');$('#wfin').focus();return}fixWord({kind:'fix',fixed:v})};
+  if($('#wok'))$('#wok').onclick=()=>fixWord({kind:'ok'});
+  if($('#wundo'))$('#wundo').onclick=()=>fixWord({undo:1});
+  c.scrollIntoView({block:'nearest',behavior:'smooth'});
+  if(w.b)drawClip(w.b,CARD);
+}
+// قصاصةُ الكلمة من صورة الصفحة بموضعها المحفوظ (ws في boxes)، تُقصّ في الصفحة نفسها بلا طلبٍ جديد إن كانت الصورة ظاهرة
+async function drawClip(box,card){
+  let src=($('#pvimgw img')||{}).src;
+  if(!src){const r=await api('/api/image',{b:PV.b,n:PV.n,mark:''});if(r.error||CARD!==card)return;src=r.url}
+  const im=new Image();im.src=src;await new Promise(res=>{im.onload=res;im.onerror=res});
+  if(CARD!==card||!im.naturalWidth)return;
+  const [x,y,bw,bh]=box,W=im.naturalWidth,H=im.naturalHeight,pad=bh*H*0.35;
+  const sx=Math.max(0,x*W-pad*2),sy=Math.max(0,y*H-pad),sw=Math.min(W-sx,bw*W+pad*4),sh=Math.min(H-sy,bh*H+pad*2);
+  const h=54,cv=document.createElement('canvas');cv.height=h*2;cv.width=Math.max(2,Math.round(sw/sh*h*2));
+  cv.getContext('2d').drawImage(im,sx,sy,sw,sh,0,0,cv.width,cv.height);
+  cv.style.height=h+'px';cv.style.width=Math.round(cv.width/2)+'px';cv.title='الكلمةُ في صورة الصفحة';
+  const el=$('#wclip');if(el){el.innerHTML='';el.appendChild(cv)}
+}
+async function fixWord(o){
+  const C=CARD;if(!C)return;const w=C.w;
+  const r=await api('/api/fix',null,Object.assign({b:PV.b,n:PV.n,layer:C.l,i:w.i0!=null?w.i0:w.i,orig:w.t},o));
+  if(r.error){toast(r.error);return}
+  toast(o.undo?'أُلغي':r.kind=='ok'?'أُقرّت كما قُرئت':'حُفظ تصحيحُك');
+  const at=+C.s.dataset.i,lay=C.l;closeCard();
+  await drawWords(PV.data,true);
+  const s=document.querySelector('#pv .wd[data-l="'+lay+'"][data-i="'+at+'"]');if(s){s.classList.add('on');drawImgBoxes(s.dataset.b)}
+}
+document.addEventListener('click',e=>{if(!CARD||e.target.closest('#wcard,.wd,#wnext,#cmenu,.toast'))return;
+  if(e.target.closest('#pvcol,#imgcol'))closeCard()});
 function drawImgBoxes(cur){
   const wrap=$('#pvimgw .imgwrap');if(!wrap)return;
   wrap.querySelectorAll('.wbox').forEach(x=>x.remove());
@@ -1674,18 +1810,27 @@ document.addEventListener('keydown',e=>{if(!PV.data||!$('#p-search').classList.c
     b.textContent=names[v];try{localStorage.setItem('bughya-theme',v)}catch(e){}};
   set(names[t]?t:'auto');b.onclick=()=>set(next[t]);
 })();
-// المحدَّدُ إن وُجد، وإلّا متنُ الصفحة كلُّه (وحاشيتُها نقلٌ مستقلٌّ بتحديدها)
-function pvQuote(){const p=PV.data;if(!p)return null;const sel=pvSel();
-  if(sel)return {text:sel,foot:!!p.foot&&$('#pvfoot').contains(getSelection().anchorNode)};
-  const t=String(p.body||'').replace(/\s+/g,' ').trim();return t?{text:t,foot:false}:null}
+// المحدَّدُ إن وُجد، وإلّا متنُ الصفحة كلُّه (وحاشيتُها نقلٌ مستقلٌّ بتحديدها) — كما يُعرض، أي بتصحيحات المستخدم.
+// ومعه: الكلماتُ المصحَّحة فيه (لتقابله البوّابة بما قُرئ)، وهل حُكم على كلّ مشكوكٍ فيه (فيُعدّ مقابَلًا بالصورة)
+function pvQuote(){const p=PV.data;if(!p)return null;const sel=pvSel(),g=getSelection();
+  const foot=!!sel&&!!p.foot&&$('#pvfoot').contains(g.anchorNode);
+  const words=[...document.querySelectorAll(foot?'#pvfoot .wd':'#pvbody .wd')].filter(s=>!sel||g.containsNode(s,true));
+  const text=sel||($('#pvbody').querySelector('.wd')?$('#pvbody').innerText:String(p.body||'')).replace(/\s+/g,' ').trim();
+  if(!text)return null;
+  const fixes=words.filter(s=>s.classList.contains('fx')).map(s=>{const w=wordOf(s);return w&&{o:w.t,x:w.x}}).filter(Boolean);
+  const left=words.filter(s=>s.classList.contains('dq')).length,done=words.filter(s=>s.classList.contains('fx')||s.classList.contains('okw')).length;
+  return {text,foot,fixes,checked:!!done&&!left}}
 ['pvcopy','pvadd'].forEach(id=>$('#'+id).onmousedown=e=>e.preventDefault());   // لا يُفقِد الضغطُ التحديد
 $('#pvcopy').onclick=()=>{
   const p=PV.data,q=pvQuote();if(!q){toast('لا نصَّ في هذه الصفحة');return}
-  copy('«'+q.text+'» — '+p.cite+' · رقم الكتاب '+AR(p.book_id)+(q.foot?' · الحاشية':'')+(p.method=='ocr'?' (قراءةٌ آليّة لم تُقابَل بالصورة)':''));
+  copy('«'+q.text+'» — '+p.cite+' · رقم الكتاب '+AR(p.book_id)+(q.foot?' · الحاشية':'')+
+    (p.method=='ocr'?(q.checked?' (قراءةٌ آليّة، قوبلت كلماتُها المشكوكُ فيها بالصورة'+(q.fixes.length?' وصُحّح منها '+AR(q.fixes.length):'')+')':' (قراءةٌ آليّة لم تُقابَل بالصورة)'):
+     q.fixes.length?' (صُحّح منه '+AR(q.fixes.length)+' من صورة الصفحة)':''));
 };
 $('#pvadd').onclick=()=>{
   const p=PV.data,q=pvQuote();if(!q){toast('لا نصَّ في هذه الصفحة');return}
-  addToDraft({kind:'quote',text:q.text,b:p.book_id,n:p.n,cite:p.cite,vol:p.vol,printed:p.printed,unit:p.unit,layer:q.foot?'حاشية':'متن',method:p.method});
+  addToDraft({kind:'quote',text:q.text,b:p.book_id,n:p.n,cite:p.cite,vol:p.vol,printed:p.printed,unit:p.unit,layer:q.foot?'حاشية':'متن',method:p.method,
+    fixes:q.fixes.length?q.fixes:undefined,imgok:q.checked||undefined});
 };
 $('#pvsearch').onclick=()=>{S.books=new Set([PV.b]);setTab('res');$('#q').focus();
   if(S.q){S.offset=0;S.results=[];run(false);drawFacet()}else toast('اكتب ما تبحث عنه؛ وسيُحصر في هذا الكتاب')};
@@ -1796,7 +1941,7 @@ function qtOpen(s){
   let v='';
   if(it.kind=='aya')v='<div class="v">آية: ['+esc(it.ref||'')+']</div>';
   else{v='<div class="c">'+citeHTML(it.cite)+' <span class="bid nw">رقم الكتاب '+AR(it.b)+'</span></div><div class="v">'+
-    (it.layer=='حاشية'?'<span class="tag foot">الحاشية</span>':'')+(it.method=='ocr'?'<span class="tag ocr">قراءةٌ آليّة</span>':'')+
+    (it.layer=='حاشية'?'<span class="tag foot">الحاشية</span>':'')+(it.method=='ocr'?'<span class="tag ocr">قراءةٌ آليّة</span>':'')+(it.fixes&&it.fixes.length?'<span class="tag fixt" title="'+esc(it.fixes.map(f=>'«'+f.x+'» قُرئت «'+f.o+'»').join('، '))+'">صحّحتَ فيه '+AR(it.fixes.length)+' من الصورة</span>':'')+
     (it.verdict=='غيرُ مطابق'?'<span class="tag bad">لا يطابق نصَّ الصفحة</span>':it.verdict?'<span class="tag ok">'+esc(it.verdict)+'</span>':'')+
     (it.method=='ocr'&&!it.imgok?'<span class="tag warn">لم يُقابَل بالصورة</span>':'')+'</div>'+
     (it.vnote?'<div class="muted" style="font-size:13px">'+esc(it.vnote)+'</div>':'')+
