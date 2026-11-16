@@ -117,6 +117,8 @@ def page_variants(page, fitz) -> list:
             for s in ln.get("spans", []):
                 if s.get("size", 0) < 4:            # نصٌّ خفيٌّ بحجمٍ ضئيل لا يُرى في الصفحة
                     continue
+                if is_mushaf(s.get("font")):        # خطُّ المصحف: رموزُه كلماتٌ بلا حروف، تُقرأ صورتُها (mushaf_pieces)
+                    continue
                 for c in s.get("chars", []):
                     text.append(c["c"])
                     chars.append((c["c"], c["bbox"][0], c["bbox"][2]))
@@ -145,6 +147,49 @@ def page_variants(page, fitz) -> list:
     return [native, built, flipped]
 
 
+def is_mushaf(font) -> bool:
+    """خطوطُ مصحف مجمّع الملك فهد (QCF_P001… وQCF2001… وQCF_BSML): كلُّ رمزٍ كلمةٌ مرسومة، وما في الملفّ من حروفها لا يدلّ عليها."""
+    return bool(font) and font.split("+")[-1].upper().startswith("QCF")
+
+
+def mushaf_pieces(page, fitz) -> list:
+    """مواضعُ خطّ المصحف في الصفحة: قطعٌ متّصلةٌ في السطر الواحد (تُفصل عند فراغٍ أوسع من حجم الخطّ، فلا يدخلها كلامٌ
+    بخطٍّ آخر بينها) ← [{rect، size}] بترتيب القراءة: السطورُ من أعلى، والقطعُ في السطر من اليمين."""
+    try:
+        if not any(is_mushaf(f[3]) for f in page.get_fonts()):
+            return []
+        boxes = []
+        for sp in page.get_texttrace():
+            if is_mushaf(sp.get("font")) and sp.get("size", 0) >= 4:
+                for c in sp["chars"]:
+                    r = fitz.Rect(c[3])
+                    if r.width > 0.3 and r.height > 0:
+                        boxes.append((r, sp["size"]))
+    except Exception:
+        return []
+    rows = []
+    for r, size in sorted(boxes, key=lambda b: (b[0].y1, -b[0].x1)):
+        for row in rows:
+            top, bot = max(row["y0"], r.y0), min(row["y1"], r.y1)
+            if bot - top >= 0.5 * min(row["y1"] - row["y0"], r.height):
+                row["boxes"].append((r, size))
+                row["y0"], row["y1"] = min(row["y0"], r.y0), max(row["y1"], r.y1)
+                break
+        else:
+            rows.append({"y0": r.y0, "y1": r.y1, "boxes": [(r, size)]})
+    out = []
+    for row in sorted(rows, key=lambda w: w["y0"]):
+        cur = None
+        for r, size in sorted(row["boxes"], key=lambda b: -b[0].x1):
+            if cur is not None and cur["rect"].x0 - r.x1 <= size:
+                cur["rect"] |= r
+                cur["size"] = max(cur["size"], size)
+            else:
+                cur = {"rect": fitz.Rect(r), "size": size}
+                out.append(cur)
+    return out
+
+
 def native_lines(page, fitz) -> list:
     """نصُّ المكتبة كما هو بأسطره (احتياطٌ إن تعذّرت قراءةُ الحروف بمواضعها)."""
     W, H = page.rect.width or 1, page.rect.height or 1
@@ -157,7 +202,7 @@ def native_lines(page, fitz) -> list:
         if b.get("type") != 0:
             continue
         for ln in b.get("lines", []):
-            spans = [x for x in ln.get("spans", []) if x.get("text") and x.get("size", 0) >= 4]
+            spans = [x for x in ln.get("spans", []) if x.get("text") and x.get("size", 0) >= 4 and not is_mushaf(x.get("font"))]
             t = "".join(x["text"] for x in spans)
             if not t.strip():
                 continue
