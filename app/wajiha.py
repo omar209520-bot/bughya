@@ -1479,7 +1479,7 @@ function hl(t){
   return h;
 }
 async function showImg(){
-  const w=$('#pvimgw');w.style.display='block';$('#pvtwo').classList.remove('one');pvGrid();w.innerHTML='<div class="wait">تُجهَّز الصورة…</div>';
+  const w=$('#pvimgw');w.style.display='block';$('#pvtwo').classList.remove('one');pvGrid();w.innerHTML='<div class="wait">الصورةُ تُجهَّز…</div>';
   const mark=S.mode=='phrase'&&S.q?S.q:'';
   let r=await api('/api/image',{b:PV.b,n:PV.n,mark});
   if(r.error&&mark)r=await api('/api/image',{b:PV.b,n:PV.n,mark:''});
@@ -1707,7 +1707,7 @@ function dWarn(){const ids=[...ED.querySelectorAll('.qt')].map(s=>itemOf(s.datas
   return (bad?AR(bad)+' نقلًا لا يطابق صفحته':'')+(bad&&ocr?'، و':'')+(ocr?AR(ocr)+' نقلًا لم يُقابَل بالصورة':'')}
 const dEmpty=()=>!ED.textContent.trim()&&!ED.querySelector('.qt');
 async function dExport(kind){await saveDrafts(true);const d=curDraft();if(dEmpty()){toast('المسودة فارغة');return}
-  toast(kind=='pdf'?'يُجهَّز PDF…':'يُجهَّز ملفُّ وورد…');
+  toast(kind=='pdf'?'يُجهَّز PDF…':'ملفُّ وورد يُجهَّز…');
   const r=await api('/api/draft/'+kind,null,kind=='pdf'?{id:d.id,html:dHTML(d)}:{id:d.id});
   if(r.error){toast(r.error);return}
   if(r.fallback){toast('تعذّر صنعُ PDF مباشرة؛ فاختر في نافذة الطباعة «Microsoft Print to PDF»');setTimeout(dPrint,1500);return}
@@ -1981,7 +1981,7 @@ adz.addEventListener('drop',e=>{const f=[...e.dataTransfer.files].find(x=>x.name
 $('#apick').onclick=()=>$('#ainp').click();$('#ainp').onchange=e=>e.target.files[0]&&auditFile(e.target.files[0]);
 async function auditFile(f){
   if(!PG||!PG.books_total){toast('أضف كتبًا أوّلًا ثمّ دقّق');return}
-  $('#ares').innerHTML='';$('#aprog').innerHTML='<div class="wait">يُرفع الملفّ…</div>';
+  $('#ares').innerHTML='';$('#aprog').innerHTML='<div class="wait">الملفُّ يُرفع…</div>';
   const u=await (await fetch('/api/tadqiq/upload?rel='+encodeURIComponent(f.name),{method:'PUT',body:f})).json();
   if(u.error||u.skipped){$('#aprog').innerHTML='<div class="err">تعذّر رفعُ الملفّ.</div>';return}
   const s=await api('/api/tadqiq/start',null,{file:f.name});if(s.error){$('#aprog').innerHTML='<div class="err">'+esc(s.error)+'</div>';return}
