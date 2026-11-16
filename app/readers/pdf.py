@@ -9,8 +9,8 @@
 """
 import arabic
 from readers import ReaderError, make_page
-from readers import layout, notes
-from readers.arabic_pdf import best_lines, sample_bias
+from readers import glyphmap, layout, notes
+from readers.arabic_pdf import best_lines, mushaf_pieces, sample_bias
 
 try:
     import pymupdf as fitz          # الاسمُ الجديد للمكتبة
@@ -24,6 +24,7 @@ TOOL_MARKERS = ("microsoft word", "acdsee", "proprint", "acrobat", "scanner", "u
                 ".pdf", ".doc", ".tif", "adobe", "pdf-xchange", "abbyy", "nitro")
 OCR_LONG_SIDE = 3000       # طولُ الصورة المقروءة آليًّا بالنقاط الضوئيّة (سَبْر الوارث قاس ١٨٠٠ فرفعها لدقّة الطباعة القديمة)
 TEXT_LAYER_MIN = 0.88     # دون هذا التوافقِ مع القراءة الآليّة يُعدّ نصُّ الملفّ معيبًا
+MUSHAF_ZOOM = 6.0          # تكبيرُ موضع خطّ المصحف للقراءة الآليّة (قيس على الصفحة 03: ٤ و٨ أسوأ)
 MIN_LETTERS = 25           # أقلُّ من هذا في نصّ الملفّ: الصفحةُ مصوَّرة
 
 
@@ -78,6 +79,12 @@ class PdfBook:
         if self.doc.needs_pass:
             raise ReaderError("الملفُّ محميٌّ بكلمة سرّ.")
         self.kind, self.ocr = kind, ocr
+        # خريطةُ الحروف المعيبة في ملفّات وورد تُصلَح من الخطّ المضمَّن، في الذاكرة، قبل أيّ قراءة (glyphmap.py).
+        # وفحصُ النصّ بالصورة بعده كما كان: فإن بقي معيبًا قُرئ آليًّا.
+        try:
+            self.fixed = glyphmap.repair(self.doc) if kind == "pdf" else 0
+        except Exception:
+            self.fixed = 0
         self.unit, self.approx = "صفحة", False
         self.total = self.doc.page_count
         md = self.doc.metadata or {}
@@ -184,11 +191,58 @@ class PdfBook:
         if self.last_variant in ("كما هو", "تعذّر البناء") and arabic.looks_reversed(arabic.normalize(raw)):
             for l in lines:
                 l["t"] = arabic.unreverse_line(l["t"])
+        lines += self._mushaf(page)
         rec = layout.split_page(lines, ocr=False)
         for k in ("head", "body", "foot"):
             rec[k] = fix_allah(rec[k])
         return make_page(n, rec["body"], rec["foot"], rec["head"], rec["printed"], "text", None, rec["boxes"],
                          weak=arabic.is_garbage(q), catch=rec.get("catch"))
+
+    def _mushaf(self, page) -> list:
+        """الآياتُ المكتوبةُ بخطّ المصحف (QCF): رموزُه كلماتٌ مرسومةٌ لا حروفَ لها في الملفّ، فتُقرأ صورةُ موضعها وحده آليًّا،
+        ثمّ تُطابَق بآيات القرآن (ayat.mushaf): فإن صحّت المطابقةُ أُخذ لفظُ الآيات من النصّ المرفق، وإلّا بقي ما قرأته الآلة.
+        وبلا قراءةٍ آليّة لا يُكتب لها شيء (كانت تُستخرج رموزًا لا معنى لها). ← قطعُ أسطرٍ تُضمّ إلى أسطر الصفحة."""
+        pieces = mushaf_pieces(page, fitz)
+        if not pieces or self.ocr is None or not self.ocr.ok:
+            return []
+        W, H = page.rect.width or 1, page.rect.height or 1
+        side = getattr(self.ocr, "max_side", None) or OCR_LONG_SIDE
+        words, spans = [], []
+        for p in pieces:
+            r = p["rect"] + (-3, -4, 3, 4)
+            r &= page.rect
+            z = max(1.0, min(MUSHAF_ZOOM, side / max(r.width or 1, r.height or 1)))
+            try:
+                pix = page.get_pixmap(matrix=fitz.Matrix(z, z), clip=r, colorspace=fitz.csGRAY, alpha=False)
+                got = self.ocr.recognize(pix.tobytes("png"))
+            except Exception:
+                got = []
+            # كلماتُ القطعة من اليمين، وإن قسمتها الآلةُ أسطرًا
+            ws = sorted((w for g in got for w in (g.get("words") or [{"t": g["text"], "x": g["x"], "w": g["w"]}])),
+                        key=lambda w: -(w["x"] + w["w"]))
+            toks = [t for w in ws for t in arabic.clean_raw(w["t"]).split()]
+            spans.append((len(words), len(words) + len(toks)))
+            words += toks
+        if not words:
+            return []
+        import ayat
+        try:
+            got = ayat.mushaf(words)
+        except Exception:
+            got = None
+        out_words, where = got if got else (words, {k: k for k in range(len(words))})
+        out = []
+        for q, (p, (a, b)) in enumerate(zip(pieces, spans)):
+            if a == b:
+                continue
+            nxt = next((spans[k][0] for k in range(q + 1, len(spans)) if spans[k][0] < spans[k][1]), None)
+            t = " ".join(out_words[where[a]: where[nxt] if nxt is not None else len(out_words)])
+            if not t.strip():
+                continue
+            r = p["rect"]
+            out.append({"t": t, "x": r.x0 / W, "y": r.y0 / H, "w": r.width / W, "h": max(1e-4, r.height / H),
+                        "size": p["size"], "pw": W, "sp": True, "spl": True, "spr": True, "mushaf": bool(got)})
+        return out
 
     def _ocr(self, page, n: int) -> dict:
         """الصفحةُ المصوَّرة صفحتين في صورةٍ واحدة تُقرأ كلُّ صفحةٍ منها وحدها، اليمنى ثمّ اليسرى،

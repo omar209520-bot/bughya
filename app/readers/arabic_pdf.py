@@ -117,6 +117,8 @@ def page_variants(page, fitz) -> list:
             for s in ln.get("spans", []):
                 if s.get("size", 0) < 4:            # نصٌّ خفيٌّ بحجمٍ ضئيل لا يُرى في الصفحة
                     continue
+                if is_mushaf(s.get("font")):        # خطُّ المصحف: رموزُه كلماتٌ بلا حروف، تُقرأ صورتُها (mushaf_pieces)
+                    continue
                 for c in s.get("chars", []):
                     text.append(c["c"])
                     chars.append((c["c"], c["bbox"][0], c["bbox"][2]))
@@ -129,6 +131,11 @@ def page_variants(page, fitz) -> list:
             size = sorted(sizes)[len(sizes) // 2] if sizes else 10.0
             geo = {"x": x0 / W, "y": y0 / H, "w": (x1 - x0) / W, "h": max(1e-4, (y1 - y0) / H), "size": size,
                    "pw": W, "sp": t != t.strip()}     # عرضُ الصفحة، وهل في طرف القطعة مسافةٌ في الملف (لضمّ القطع)
+            # وأيُّ الطرفين: مسافةٌ في الملف يسارَ المرسوم كلِّه (spl) أو يمينَه (spr)، بمواضعها لا بترتيب ورودها
+            ink = [c for c in chars if c[0].strip()]
+            lo, hi = min(c[1] for c in ink), max(c[2] for c in ink)
+            blanks = [(c[1] + c[2]) / 2 for c in chars if not c[0].strip()]
+            geo["spl"], geo["spr"] = any(x < lo for x in blanks), any(x > hi for x in blanks)
             native.append(dict(geo, t=arabic.clean_raw(t)))
             horizontal = abs(ln.get("dir", (1, 0))[1]) < 0.1
             if horizontal and any(_is_ar(c[0]) for c in chars):
@@ -138,6 +145,49 @@ def page_variants(page, fitz) -> list:
                 built.append(dict(geo, t=arabic.clean_raw(t)))
                 flipped.append(dict(geo, t=arabic.clean_raw(t)))
     return [native, built, flipped]
+
+
+def is_mushaf(font) -> bool:
+    """خطوطُ مصحف مجمّع الملك فهد (QCF_P001… وQCF2001… وQCF_BSML): كلُّ رمزٍ كلمةٌ مرسومة، وما في الملفّ من حروفها لا يدلّ عليها."""
+    return bool(font) and font.split("+")[-1].upper().startswith("QCF")
+
+
+def mushaf_pieces(page, fitz) -> list:
+    """مواضعُ خطّ المصحف في الصفحة: قطعٌ متّصلةٌ في السطر الواحد (تُفصل عند فراغٍ أوسع من حجم الخطّ، فلا يدخلها كلامٌ
+    بخطٍّ آخر بينها) ← [{rect، size}] بترتيب القراءة: السطورُ من أعلى، والقطعُ في السطر من اليمين."""
+    try:
+        if not any(is_mushaf(f[3]) for f in page.get_fonts()):
+            return []
+        boxes = []
+        for sp in page.get_texttrace():
+            if is_mushaf(sp.get("font")) and sp.get("size", 0) >= 4:
+                for c in sp["chars"]:
+                    r = fitz.Rect(c[3])
+                    if r.width > 0.3 and r.height > 0:
+                        boxes.append((r, sp["size"]))
+    except Exception:
+        return []
+    rows = []
+    for r, size in sorted(boxes, key=lambda b: (b[0].y1, -b[0].x1)):
+        for row in rows:
+            top, bot = max(row["y0"], r.y0), min(row["y1"], r.y1)
+            if bot - top >= 0.5 * min(row["y1"] - row["y0"], r.height):
+                row["boxes"].append((r, size))
+                row["y0"], row["y1"] = min(row["y0"], r.y0), max(row["y1"], r.y1)
+                break
+        else:
+            rows.append({"y0": r.y0, "y1": r.y1, "boxes": [(r, size)]})
+    out = []
+    for row in sorted(rows, key=lambda w: w["y0"]):
+        cur = None
+        for r, size in sorted(row["boxes"], key=lambda b: -b[0].x1):
+            if cur is not None and cur["rect"].x0 - r.x1 <= size:
+                cur["rect"] |= r
+                cur["size"] = max(cur["size"], size)
+            else:
+                cur = {"rect": fitz.Rect(r), "size": size}
+                out.append(cur)
+    return out
 
 
 def native_lines(page, fitz) -> list:
@@ -152,7 +202,7 @@ def native_lines(page, fitz) -> list:
         if b.get("type") != 0:
             continue
         for ln in b.get("lines", []):
-            spans = [x for x in ln.get("spans", []) if x.get("text") and x.get("size", 0) >= 4]
+            spans = [x for x in ln.get("spans", []) if x.get("text") and x.get("size", 0) >= 4 and not is_mushaf(x.get("font"))]
             t = "".join(x["text"] for x in spans)
             if not t.strip():
                 continue
