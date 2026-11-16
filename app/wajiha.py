@@ -1883,7 +1883,7 @@ async function pollProgress(){
   PG=r;const bar=$('#progbar');
   if(r.running){const pct=r.current_pages?Math.min(100,Math.round(100*(r.current_page||0)/r.current_pages)):0;
     bar.style.display='block';
-    bar.innerHTML='<b>تُقرأ كتبُك الآن</b> — قُرئ '+AR(r.books_done)+' من '+AR(r.books_total)+' كتابًا'+(r.current_title?'<br>الكتابُ الجاري: «'+esc(r.current_title)+'» — '+AR(r.current_page||0)+' من '+AR(r.current_pages||0)+(r.current_method?' ('+esc(r.current_method)+')':''):'')+
+    bar.innerHTML='<b>كتبُك تُقرأ الآن</b> — قُرئ '+AR(r.books_done)+' من '+AR(r.books_total)+' كتابًا'+(r.current_title?'<br>الكتابُ الجاري: «'+esc(r.current_title)+'» — '+AR(r.current_page||0)+' من '+AR(r.current_pages||0)+(r.current_method?' ('+esc(r.current_method)+')':''):'')+
      (r.waiting_n?'<br>في الانتظار: '+(r.waiting_n===1?'كتابٌ واحد':r.waiting_n===2?'كتابان':AR(r.waiting_n)+(r.waiting_n<=10?' كتب':' كتابًا'))+' — '+r.waiting.map(t=>'«'+esc(t)+'»').join('، ')+(r.waiting_n>r.waiting.length?' وغيرها':''):'')+
      '<div class="prog"><i style="width:'+pct+'%"></i></div><span style="font-size:14px">يمكنك البحثُ فيما قُرئ ريثما تكتمل القراءة.</span>';
     api('/api/coverage').then(c=>{if(!c.error)setCov(c)});
