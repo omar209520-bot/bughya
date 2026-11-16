@@ -91,6 +91,8 @@ class PdfBook:
         self.title = usable_meta(md.get("title")) if kind == "pdf" else ""
         self.author = ""                   # مؤلّفُ الملفّ في بياناته كثيرًا ما يكون ناسخَه: تلميحٌ لا مؤلّف
         self.hints = {k: usable_meta(md.get(k)) for k in ("title", "author", "subject")} if kind == "pdf" else {}
+        if self.fixed:      # نصُّه أُعيد بناؤه من خطّه المضمَّن: يُعلَّم فيه المشكوك فيه (wajiha.api_words)، ولا يدخل القاموس
+            self.hints["glyphmap"] = self.fixed
         self.toc = []
         if preset is not None:
             self.scanned_guess, self.force_ocr, self.bias = preset["scanned_guess"], preset["force_ocr"], preset["bias"]

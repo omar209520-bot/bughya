@@ -146,7 +146,8 @@ def build(con) -> int:
     from collections import Counter
     words = Counter()
     where = ("FROM pages p JOIN books b ON b.id = p.book_id "
-             "WHERE p.method = 'text' AND b.state != 'missing' AND (b.hints IS NULL OR b.hints NOT LIKE '%note%')")
+             "WHERE p.method = 'text' AND b.state != 'missing' AND (b.hints IS NULL OR (b.hints NOT LIKE '%note%' "
+             "AND b.hints NOT LIKE '%glyphmap%'))")      # ولا ملفُّ وورد أُعيد بناءُ نصّه: قد تكون فيه أخطاءُ البناء
     # فهرسُ الأزواج من الصفحات نفسها. حجمُ المرشّحَين يُقدَّر من طول النصّ (الأزواجُ المختلفة لا تزيد على الكلمات)، ثمّ يُطوَيان.
     chars = con.execute("SELECT SUM(LENGTH(p.body) + LENGTH(COALESCE(p.foot, ''))) " + where).fetchone()[0] or 0
     index = _Index(chars)
