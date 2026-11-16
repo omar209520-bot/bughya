@@ -21,6 +21,7 @@ LTR = {"L", "EN", "AN"}
 GAP_EM, GAP_MIN = 0.05, 0.6       # فراغٌ أوسعُ من هذا بين حرفين فهو مسافةُ كلمة (بوحدة حجم الخطّ)؛
                                   # قيس على أربعة ملفّات: ٠٫٠٤–٠٫٠٦ أكثرُ كلماتٍ شائعة من ٠٫٠٨٥ و٠٫١٢
 SEP = {"CS", "ES", "ET"}
+OVERHANG = 0.6        # أقصى ما يتقدّم به طرفُ حرفٍ امتدّ رأسُه فوق الحرف قبله (بالنقطة)
 
 
 def _mark(c: str) -> bool:
@@ -38,6 +39,14 @@ def rebuild(chars: list, size: float, reverse_groups: bool) -> str:
     if not base:
         return ""
     order = sorted(range(len(base)), key=lambda i: (-round(base[i][2], 1), i))
+    # حرفٌ يمتدّ رأسُه فوق الحرف قبله (رأسُ الكاف فوق الراء في «المركب» بخطّ Traditional Arabic) يقع طرفُه الأيمن
+    # وراء طرف الحرف قبله بقليل، فيتقدّم عليه. فإن تقاربا (دون OVERHANG) وكان الملفّ يكتب المتأخّرَ أوّلًا ووسطُه أبعدَ
+    # يمينًا، رُدّا إلى ترتيب الملفّ. ولا يُمسّ غيرُ الحروف العربيّة (الأرقامُ تُرتَّب بعد ذلك من اليسار)
+    for k in range(len(order) - 1):
+        a, b = base[order[k]], base[order[k + 1]]
+        if (order[k + 1] < order[k] and 0 <= a[2] - b[2] < OVERHANG and a[2] - a[1] > 0.3 and b[2] - b[1] > 0.3
+                and (b[1] + b[2]) > (a[1] + a[2]) and "ء" <= a[0] <= "ي" and "ء" <= b[0] <= "ي"):    # حرفان عربيّان
+            order[k], order[k + 1] = order[k + 1], order[k]
     seq = [[base[i][0], base[i][1], base[i][2], []] for i in order]
     # الحرفُ المركّب: حروفُه الأولى بلا عرضٍ عند طرفه الأيمن، وآخرُها بعرضه كلِّه
     k = 0
