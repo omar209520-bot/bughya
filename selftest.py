@@ -177,6 +177,39 @@ def main() -> int:
         report(layout.split_page(page)["catch"] is None, "آخرُ فقرةٍ قصيرٌ على اليمين لا يُعدّ تعقيبة")
         from readers.pdf import fix_allah
         report(fix_allah("اذكروا اللَ ذكرا والل أعلم الليل وال") == "اذكروا اللَه ذكرا والله أعلم الليل وال", "لفظُ الجلالة الناقصُ في ملفّات وورد يُردّ، ولا يمسّ غيرَه")
+        # خريطةُ الحروف المعيبة (ملفّات وورد): تُفسَد خريطةُ ملفٍّ صُنع هنا بخطٍّ عربيٍّ مضمَّن كما يفسدها وورد (حروفٌ مسافة،
+        # والتاءُ المربوطة تطويل)، ثمّ تُصلَح من جدول الخطّ المضمَّن. وملفٌّ خريطتُه سليمةٌ لا يُمسّ.
+        import re as _re
+        import pymupdf as _fz
+        from readers import glyphmap
+
+        def word_pdf(damage: bool) -> bytes:
+            d = _fz.open()
+            pg = d.new_page(width=420, height=200)
+            pg.insert_font(fontname="F0", fontfile=str(pathlib.Path(__file__).resolve().parent / "app" / "data" / "fonts" / "ArefRuqaa-Bold.ttf"))
+            pg.insert_text((40, 80), "كتاب الصلاة والزكاة", fontname="F0", fontsize=20)
+            for x in range(1, d.xref_length()):
+                t = _re.search(r"/ToUnicode\s+(\d+)", d.xref_object(x))
+                if damage and t and "/Type0" in d.xref_object(x):
+                    m = glyphmap.parse(d.xref_stream(int(t.group(1))).decode("latin-1"))
+                    m.update({g: (" " if v in "ابلص" else "ـ") for g, v in m.items() if v in "ابلصة"})
+                    d.update_stream(int(t.group(1)), glyphmap.write(m))
+            return d.tobytes()
+
+        text = lambda d: arabic.normalize(d[0].get_text())
+        bad, good = _fz.open("pdf", word_pdf(True)), _fz.open("pdf", word_pdf(False))
+        was = text(_fz.open("pdf", word_pdf(True)))
+        fixed, untouched = glyphmap.repair(bad), glyphmap.repair(good)
+        want = text(_fz.open("pdf", word_pdf(False)))
+        report(was != want and text(bad) == want and fixed > 0 and untouched == 0,
+               "خريطةُ الحروف المعيبة تُصلَح من الخطّ المضمَّن، والسليمةُ لا تُمسّ", "%r ← %r" % (text(bad), was))
+        # آياتٌ بخطّ المصحف: ما قرأته الآلةُ (بأخطائه وبالرسم العثمانيّ) يُطابَق بآياتها، وكلامٌ غيرُ قرآنيٍّ لا يُطابَق
+        import ayat
+        got = ayat.mushaf("الم ذلك الكتب لا رب فيه هدى للأنقين الذين يؤمنون بالغيب ويقيمون الصلوة ويما رز ينفقون".split())
+        norm = arabic.normalize(" ".join(got[0])) if got else ""
+        report("ذلك الكتاب لا ريب فيه" in norm and "رزقناهم ينفقون" in norm
+               and ayat.mushaf("هذا كتاب في أصول الفقه كتبه المؤلف في شبابه".split()) is None,
+               "آياتُ خطّ المصحف تُطابَق بالقرآن بعد القراءة الآليّة", norm[:80])
         x = TMP / "t.xlsx"
         tadqiq.to_xlsx(res["items"], x, "فصل.docx", res["coverage"])
         report(x.is_file() and x.stat().st_size > 1000, "تصديرُ نتيجة التدقيق إلى إكسل")
