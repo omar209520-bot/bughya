@@ -444,9 +444,16 @@ def api_progress(q: dict) -> dict:
         errors = [{"title": r["title"], "error": r["error"], "state": r["state"]} for r in con.execute(
             "SELECT title, error, state FROM books WHERE state IN ('error', 'unsupported') ORDER BY id LIMIT 30")]
         pages = con.execute("SELECT COUNT(*) FROM pages").fetchone()[0]
+        # الكتبُ التي تنتظر دورها، بترتيب القراءة نفسه (maktaba.update): المقدَّمةُ أوّلًا، ثمّ النصّيُّ قبل المصوَّر، فالأصغر
+        cur = pr.get("current_id") if live else None
+        first = maktaba.first_ids()
+        queue = [r for r in con.execute("SELECT id, title FROM books WHERE state IN ('pending', 'reading') "
+                                        "ORDER BY state = 'reading' DESC, scanned_guess, size") if r["id"] != cur]
+        queue.sort(key=lambda r: first.index(r["id"]) if r["id"] in first else len(first))
     finally:
         con.close()
     return {"books_total": c["books_total"], "books_done": c["books_done"], "pending": c["pending"], "pages": pages,
+            "waiting": [r["title"] for r in queue[:5]], "waiting_n": len(queue),
             "running": live, "scanned_unread": scanned, "errors": errors,
             "sources": [str(x) for x in common.sources() if str(x) != str(common.BOOKS)],
             "current_title": pr.get("current_title") if live else None,
@@ -1877,6 +1884,7 @@ async function pollProgress(){
   if(r.running){const pct=r.current_pages?Math.min(100,Math.round(100*(r.current_page||0)/r.current_pages)):0;
     bar.style.display='block';
     bar.innerHTML='<b>تُقرأ كتبُك الآن</b> — قُرئ '+AR(r.books_done)+' من '+AR(r.books_total)+' كتابًا'+(r.current_title?'<br>الكتابُ الجاري: «'+esc(r.current_title)+'» — '+AR(r.current_page||0)+' من '+AR(r.current_pages||0)+(r.current_method?' ('+esc(r.current_method)+')':''):'')+
+     (r.waiting_n?'<br>في الانتظار: '+(r.waiting_n===1?'كتابٌ واحد':r.waiting_n===2?'كتابان':AR(r.waiting_n)+(r.waiting_n<=10?' كتب':' كتابًا'))+' — '+r.waiting.map(t=>'«'+esc(t)+'»').join('، ')+(r.waiting_n>r.waiting.length?' وغيرها':''):'')+
      '<div class="prog"><i style="width:'+pct+'%"></i></div><span style="font-size:14px">يمكنك البحثُ فيما قُرئ ريثما تكتمل القراءة.</span>';
     api('/api/coverage').then(c=>{if(!c.error)setCov(c)});
   }else bar.style.display='none';
