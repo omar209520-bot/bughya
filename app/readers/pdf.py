@@ -67,7 +67,9 @@ def spread_gutter(page):
 
 
 class PdfBook:
-    def __init__(self, path, kind: str, ocr=None):
+    def __init__(self, path, kind: str, ocr=None, preset=None):
+        """preset: ما قرّرته عمليّةٌ أخرى فتحت الكتابَ نفسَه (مصوَّرٌ؟ نصُّه معيب؟)، فلا يُعاد فحصُه (readers/parallel.py)."""
+        self.path = str(path)
         if fitz is None:
             raise ReaderError("مكتبةُ قراءة بي دي إف غير منصّبة: أعد التنصيب.")
         try:
@@ -90,6 +92,9 @@ class PdfBook:
         self.author = ""                   # مؤلّفُ الملفّ في بياناته كثيرًا ما يكون ناسخَه: تلميحٌ لا مؤلّف
         self.hints = {k: usable_meta(md.get(k)) for k in ("title", "author", "subject")} if kind == "pdf" else {}
         self.toc = []
+        if preset is not None:
+            self.scanned_guess, self.force_ocr, self.bias = preset["scanned_guess"], preset["force_ocr"], preset["bias"]
+            return
         if kind == "pdf":
             try:
                 for lvl, t, pg in self.doc.get_toc(simple=True):
@@ -153,6 +158,11 @@ class PdfBook:
             pass
 
     def pages(self, start: int = 1):
+        # الكتابُ الذي تُقرأ صفحاتُه كلُّها آليًّا (مصوَّر، أو نصُّه معيب) يُقرأ بعدّة عمليّاتٍ معًا حيث يُتاح
+        if self.kind == "pdf" and self.scanned_guess and self.ocr is not None and self.ocr.ok:
+            from readers import parallel
+            yield from parallel.pages(self, start)
+            return
         for i in range(max(0, start - 1), self.total):
             yield self.read(i)
 
