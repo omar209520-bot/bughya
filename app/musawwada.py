@@ -6,7 +6,7 @@
 المسوّدة: name · items (النقول بعزوها) · body (الصفحة: فقرات)
   الفقرة   {"t": "p" (نصّ) أو "h" (عنوان), "c": [نصٌّ من كلام الباحث, {"q": رقمُ النقل}, …]}
   quote    نقلٌ من كتاب: text · b · n · cite · vol · printed · unit · layer (متن|حاشية) · method (text|ocr)
-           · imgok (قابله الباحثُ بالصورة) · verdict · vnote
+           · imgok (قابله الباحثُ بالصورة) · fixes (كلماتٌ صحّحها من الصورة في القارئ: o · x) · verdict · vnote
   aya      آية: text · ref (السورة: الآية)
 والنقلُ في الصفحة قطعةٌ واحدة لا يُكتب داخلها، فلا يختلط كلامُ الباحث بالنقل.
 """
@@ -92,6 +92,11 @@ def _clean_item(it: dict) -> dict:
             out[k] = (str(v)[:TEXT_MAX] if t is str else t(v))
         except (TypeError, ValueError):
             continue
+    # الكلماتُ التي صحّحها المستخدمُ من الصورة في القارئ (o كما قُرئت، x ما كتبه): تُحفظ مع النقل لتقابله البوّابة
+    fixes = [{"o": str(f["o"])[:80], "x": str(f["x"])[:80]} for f in (it.get("fixes") or [])[:200]
+             if isinstance(f, dict) and f.get("o") and f.get("x")]
+    if fixes:
+        out["fixes"] = fixes
     return out if out.get("text") else None
 
 
@@ -116,10 +121,21 @@ def check(item: dict) -> dict:
     """يقابل النقلَ بصفحته: حكمُ بوّابة النقل وملاحظتُها."""
     import bawwaba
     import store
+    text = str(item.get("text") or "")
+    fixes = [f for f in item.get("fixes") or [] if isinstance(f, dict) and f.get("o") and f.get("x")]
     con = store.connect(readonly=True)
     try:
-        r = bawwaba.verify(con, int(item["b"]), int(item["n"]), str(item.get("text") or ""),
-                           image_checked=bool(item.get("imgok")))
+        r = bawwaba.verify(con, int(item["b"]), int(item["n"]), text, image_checked=bool(item.get("imgok")))
+        if fixes and r.get("verdict") in (bawwaba.VERDICTS[4], bawwaba.VERDICTS[5]):
+            # فيه كلماتٌ صحّحها المستخدمُ من الصورة (tashih): يُقابَل النقلُ بنصّ الصفحة كما قُرئ، بإرجاع كلّ كلمةٍ مصحَّحةٍ
+            # إلى ما قُرئ في موضعها؛ فإن طابق فهو مطابقٌ بتصحيحه، والخلافُ في كلماته وحدها
+            back = text
+            for f in fixes:
+                back = back.replace(f["x"], f["o"], 1)
+            r2 = bawwaba.verify(con, int(item["b"]), int(item["n"]), back)
+            if r2.get("verdict") in bawwaba.VERDICTS[:4]:
+                r = dict(r2, note="مطابقٌ بتصحيحك: " + "، ".join("«%s» قُرئت «%s»" % (f["x"], f["o"]) for f in fixes)
+                         + ("؛ " + r2["note"] if r2.get("note") else ""))
     finally:
         con.close()
     return {"verdict": r.get("verdict", ""), "vnote": r.get("note", ""), "closest": r.get("closest", "")}

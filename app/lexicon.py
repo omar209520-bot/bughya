@@ -217,29 +217,39 @@ def _known(w: str, lex: dict) -> bool:
     return False
 
 
-def _odd(w: str, prev, nxt, lex: dict, px, pair_min: int = PAIR_MIN) -> bool:
-    """كلمةٌ معروفةٌ غريبةٌ في موضعها: لم ترد مع جارتيها، وورد مكانَها بديلٌ يخالفها في النقط. (الجارةُ None: لا جارة.)"""
+def _odd(w: str, prev, nxt, lex: dict, px, pair_min: int = PAIR_MIN):
+    """كلمةٌ معروفةٌ غريبةٌ في موضعها: لم ترد مع جارتيها، وورد مكانَها بديلٌ يخالفها في النقط. (الجارةُ None: لا جارة.)
+
+    يعيد البديلَ (موضعُ الحرف، والحرفُ البديل، والجارةُ التي ورد معها: «قبل» أو «بعد») أو None. وإن تعدّد البديلُ
+    فالذي ورد مع الجارتين، ثمّ الأكثرُ في القاموس. والبديلُ اقتراحٌ يُعرض على المستخدم ولا يُطبَّق وحده."""
     if px is None or len(w) < 2 or not (prev or nxt):
-        return False
+        return None
     seen, twice = px
     if (prev and seen.has(prev, w)) or (nxt and seen.has(w, nxt)):
-        return False
+        return None
     alt, freq = (twice if pair_min >= 2 else seen), lex.get(w, 0)
+    best, key = None, None
     for i, c in enumerate(w):
         for d in _DOT.get(c, ""):
             if d == c:
                 continue
             a = w[:i] + d + w[i + 1:]
-            if lex.get(a, 0) >= freq and _known(a, lex) and ((prev and alt.has(prev, a)) or (nxt and alt.has(a, nxt))):
-                return True
-    return False
+            if lex.get(a, 0) < freq or not _known(a, lex):
+                continue
+            before, after = bool(prev and alt.has(prev, a)), bool(nxt and alt.has(a, nxt))
+            if before or after:
+                k = (before and after, lex.get(a, 0))
+                if key is None or k > key:
+                    best, key = (i, d, "قبل" if before else "بعد"), k
+    return best
 
 
-def marks(tokens: list, pair_min: int = PAIR_MIN) -> list:
+def marks(tokens: list, pair_min: int = PAIR_MIN, alts: list = None) -> list:
     """لكلّ كلمةٍ من كلمات النصّ المتتابعة: 0 لا تُعلَّم، 1 لا يعرفها القاموس، 2 معروفةٌ غريبةٌ في موضعها (السياق).
 
     الجارةُ أقربُ كلمةٍ قبلها أو بعدها؛ وعلامةُ الترقيم المنفردة لا تقطع الجوار (كما في بناء الفهرس)، والرقمُ يقطعه.
     وبلا فهرس أزواج (قاموسٌ قديم) لا يكون إلّا 0 و1 كما كان.
+    وإن أُعطيت alts (قائمةٌ بطول tokens) كُتب فيها لكلّ كلمةٍ عُلّمت 2 بديلُها كما يعيده _odd، ولغيرها None.
     """
     lex, px = _load() or {}, _pairs()
     parts = [arabic.normalize(t).split() for t in tokens]
@@ -253,10 +263,25 @@ def marks(tokens: list, pair_min: int = PAIR_MIN) -> list:
             continue
         prev = parts[full[k - 1]][-1] if k else None
         nxt = parts[full[k + 1]][0] if k + 1 < len(full) else None
-        if _odd(ps[0], prev if prev and _WORD.fullmatch(prev) else None, nxt if nxt and _WORD.fullmatch(nxt) else None,
-                lex, px, pair_min):
+        found = _odd(ps[0], prev if prev and _WORD.fullmatch(prev) else None,
+                     nxt if nxt and _WORD.fullmatch(nxt) else None, lex, px, pair_min)
+        if found:
             out[i] = 2
+            if alts is not None:
+                alts[i] = found
     return out
+
+
+def suggest(token: str, found) -> str:
+    """البديلُ مكتوبًا في الكلمة كما قُرئت: يُبدَل الحرفُ وحده، ويبقى ما سواه (الهمزاتُ والتاءُ المربوطة والحركات والترقيم).
+    found ما يعيده _odd لكلمةٍ واحدةٍ من tokens. وإن لم تتّفق حروفُ الكلمة وتطبيعُها عُرض البديلُ مطبَّعًا."""
+    i, d, _side = found
+    letters = [k for k, ch in enumerate(token) if _ARABIC.match(ch)]
+    norm = "".join(_WORD.findall(arabic.normalize(token)))
+    if len(letters) != len(norm) or i >= len(letters):
+        return norm[:i] + d + norm[i + 1:]
+    k = letters[i]
+    return token[:k] + d + token[k + 1:]
 
 
 def doubt(word: str, prev: str = None, nxt: str = None) -> bool:

@@ -34,6 +34,11 @@ IDLE = 300            # ثوانٍ بلا صفحةٍ مفتوحة ثمّ يُغ�
 _last_ping = [time.time()]
 _lock = threading.Lock()
 NOWIN = 0x08000000 if common.IS_WIN else 0   # CREATE_NO_WINDOW: لا تظهر نافذةُ طرفيّةٍ مع كلّ بحث
+# حدُّ «قراءة هذه الصفحة ضعيفة» فوق نصّ الصفحة: نسبةُ الكلمات المعلَّمة من كلّها، وأقلُّ عددٍ منها.
+# قيس على سبع صفحاتٍ من صفحات المرجع (tests/results/marks-*.json): الجيّدةُ عُلّم فيها ٢–٥٪، والرديئةُ ١١–٢٨٪.
+# فهو تقريبيّ، ويُغيَّر هنا متى أُعيد القياس على صفحاتٍ أكثر.
+WEAK_SHARE = 0.08
+WEAK_MIN = 3
 
 
 def run(tool: str, *args, timeout: int = 180) -> tuple:
@@ -146,15 +151,40 @@ def _align(text: str, ws: list, doubt: bool) -> list:
             for k in range(i2 - i1):
                 boxes[i1 + k] = ws[j1 + k][1:]
     # 1 لا يعرفها القاموس، 2 يعرفها وهي غريبةٌ بين جارتيها ولها بديلٌ في النقط يناسبهما (lexicon.marks)
-    mk = lexicon.marks(flat) if doubt else [0] * len(flat)
+    alts = [None] * len(flat)
+    mk = lexicon.marks(flat, alts=alts) if doubt else [0] * len(flat)
+    has = lambda t: any("ء" <= ch <= "ي" for ch in t)
     out, k = [], 0
     for l in lines:
         row = []
         for t in l:
-            row.append({"t": t, "b": boxes[k], "d": bool(mk[k]), "c": mk[k] == 2})
+            w = {"t": t, "b": boxes[k], "d": bool(mk[k]), "c": mk[k] == 2}
+            if alts[k]:
+                # اقتراحُ القاموس، والجارةُ التي ورد معها البديلُ في كتب المستخدم (لا عددَ: الفهرسُ لا يحفظه)
+                side = alts[k][2]
+                j = k - 1 if side == "قبل" else k + 1
+                while 0 <= j < len(flat) and not has(flat[j]):
+                    j += -1 if side == "قبل" else 1
+                w["a"] = lexicon.suggest(t, alts[k])
+                if 0 <= j < len(flat):
+                    w["with"], w["side"] = flat[j], side
+            row.append(w)
             k += 1
         out.append(row)
     return out
+
+
+def _fixes(p, res: dict) -> None:
+    """تصحيحاتُ المستخدم (tashih) فوق كلمات الصفحة: لا يتغيّر نصُّ الكتاب، ويُعرض التصحيحُ معلَّمًا بأنّه منه."""
+    import store
+    import tashih
+    con = store.connect(readonly=True)
+    try:
+        b = store.book(con, p["book_id"])
+    finally:
+        con.close()
+    rows = tashih.page(b, p["n"]) if b is not None else []
+    res["stale"] = sum(tashih.apply([w for l in res.get(key) or [] for w in l], rows, key) for key in ("body", "foot"))
 
 
 def _repaired(book_id: int) -> bool:
@@ -191,6 +221,7 @@ def api_words(q: dict):
         res = {"words": True, "lexicon": doubt, "text": True}
         for key in ("body", "foot"):
             res[key] = _align(p[key], [], doubt)
+        _fixes(p, res)
         return res
     if not any(bx.get("ws") for bx in boxes):     # قُرئ بإصدارٍ قبل حفظ مواضع الكلمات
         return {"words": False, "old": True}
@@ -199,7 +230,36 @@ def api_words(q: dict):
     for key, lay in (("body", "b"), ("foot", "f")):
         ws = [w for bx in boxes if bx.get("l") == lay for w in (bx.get("ws") or [])]
         res[key] = _align(p[key], ws, doubt)
+    _fixes(p, res)
     return res
+
+
+def api_fix(body: dict) -> dict:
+    """يحفظ تصحيحَ كلمةٍ (أو أنّها صحيحة) في ملفّ التصحيحات، أو يلغيه (undo). نصُّ الكتاب في المخزن لا يُمسّ."""
+    import store
+    import tashih
+    try:
+        b, n, idx = int(body["b"]), int(body["n"]), int(body["i"])
+    except (KeyError, TypeError, ValueError):
+        return {"error": "طلبٌ ناقص."}
+    layer = body.get("layer")
+    con = store.connect(readonly=True)
+    try:
+        book, pg = store.book(con, b), store.page(con, b, n)
+    finally:
+        con.close()
+    if book is None or pg is None:
+        return {"error": "لا صفحةَ بهذا الرقم."}
+    if body.get("undo"):
+        return tashih.remove(book, n, layer, idx)
+    words = (pg[layer] or "").split() if layer in ("body", "foot") else []
+    orig = str(body.get("orig") or "")
+    if orig not in words:              # الكلمةُ كما قُرئت يجب أن تكون في نصّ الصفحة نفسه
+        return {"error": "الكلمةُ ليست في نصّ هذه الصفحة؛ أعد فتح الصفحة."}
+    try:
+        return tashih.save(book, n, layer, idx, orig, body.get("kind") or "fix", body.get("fixed"))
+    except ValueError as e:
+        return {"error": str(e)}
 
 
 def api_groups_get(q: dict):
@@ -756,6 +816,7 @@ POST = {
     "/api/draft/check": api_draft_check,
     "/api/draft/docx": api_draft_docx,
     "/api/draft/pdf": api_draft_pdf,
+    "/api/fix": api_fix,
 }
 
 
@@ -791,7 +852,9 @@ class Handler(BaseHTTPRequestHandler):
         _last_ping[0] = time.time()
         if u.path in ("/", "/index.html"):
             ver = common.ar(common.VERSION).replace(".", "٫")
-            return self._send(200, PAGE.replace("__VER__", ver).encode("utf-8"), "text/html; charset=utf-8")
+            page = PAGE.replace("__VER__", ver).replace("__WEAK_SHARE__", repr(WEAK_SHARE)).replace(
+                "__WEAK_MIN__", str(WEAK_MIN))
+            return self._send(200, page.encode("utf-8"), "text/html; charset=utf-8")
         if u.path.startswith("/font/"):     # خطُّ الرقعة لاسم البرنامج (رخصة SIL OFL، معه في data/fonts)
             f = common.APP_DATA / "fonts" / pathlib.Path(u.path).name
             if f.suffix == ".ttf" and f.is_file():
@@ -965,30 +1028,30 @@ PAGE = r"""<!doctype html>
 <title>بُغية</title>
 <style>
 /* الأخضر والذهبي المألوفان في البرامج الإسلامية، وحمرة العناوين في المخطوط للعزو */
-:root{--bg:#f7f3e6;--card:#fffdf6;--ink:#1f2a24;--mute:#5a665d;--line:#ddd6bf;--acc:#0b5240;--acc2:#e9f0e6;--rail:#0b3d2e;--railink:#f1e9cf;--gold:#c9a13f;--mark:#f1dc9a;--rub:#7a1f1f;--foot:#5c4a8a;--ocr:#855414;--err:#a8201a;
+:root{--bg:#fbf8f1;--card:#fffdf8;--ink:#1f2a24;--mute:#5a665d;--line:#e5dcc6;--acc:#173b2e;--acc2:#e9f0e6;--rail:#173b2e;--railink:#f1e9cf;--gold:#b8892b;--mark:#f4e3a8;--rub:#9b2c2c;--foot:#5c4a8a;--ocr:#855414;--err:#a8201a;
+--rescol:#f6f1e4;--imgcol:#efe9da;--doubt:#c9621a;--fixed:#1e5a36;--weak:#fbecd9;
 --text:"Traditional Arabic","Arabic Typesetting","Amiri",serif;--ui:"Segoe UI",Tahoma,sans-serif}
-@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12201a;--card:#1a2b23;--ink:#e8e6da;--mute:#a9b3a6;--line:#33453a;--acc:#9fd3b8;--acc2:#1f332a;--rail:#0a2c21;--mark:#6d5716;--rub:#eb9186;--foot:#c2b1ec;--ocr:#e3b071;--err:#f2b8b5}}
-:root[data-theme="dark"]{--bg:#12201a;--card:#1a2b23;--ink:#e8e6da;--mute:#a9b3a6;--line:#33453a;--acc:#9fd3b8;--acc2:#1f332a;--rail:#0a2c21;--mark:#6d5716;--rub:#eb9186;--foot:#c2b1ec;--ocr:#e3b071;--err:#f2b8b5}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12201a;--card:#1a2b23;--ink:#e8e6da;--mute:#a9b3a6;--line:#33453a;--acc:#9fd3b8;--acc2:#1f332a;--rail:#0a2c21;--mark:#6d5716;--rub:#eb9186;--foot:#c2b1ec;--ocr:#e3b071;--err:#f2b8b5;--rescol:#16271f;--imgcol:#0f1c16;--doubt:#eb9a5c;--fixed:#7fcf9f;--weak:#3a2a17}}
+:root[data-theme="dark"]{--bg:#12201a;--card:#1a2b23;--ink:#e8e6da;--mute:#a9b3a6;--line:#33453a;--acc:#9fd3b8;--acc2:#1f332a;--rail:#0a2c21;--mark:#6d5716;--rub:#eb9186;--foot:#c2b1ec;--ocr:#e3b071;--err:#f2b8b5;--rescol:#16271f;--imgcol:#0f1c16;--doubt:#eb9a5c;--fixed:#7fcf9f;--weak:#3a2a17}
 *{box-sizing:border-box}
 html{background:var(--bg)}
-body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 var(--ui);display:grid;grid-template-columns:186px minmax(0,1fr);min-height:calc(100vh / var(--z,1))}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.7 var(--ui);display:grid;grid-template-columns:84px minmax(0,1fr);grid-auto-rows:max-content;min-height:calc(100vh / var(--z,1))}
 body>*{grid-column:2}
 body>script{display:none}
 button,input,select,textarea{font:inherit;color:inherit}
 :focus-visible{outline:2px solid var(--gold);outline-offset:2px}
-header{grid-column:1;grid-row:1/span 40;background:var(--rail);color:var(--railink);padding:22px 0 14px;display:flex;flex-direction:column;position:sticky;top:0;height:calc(100vh / var(--z,1));overflow:auto}
+header{grid-column:1;grid-row:1/span 40;background:var(--rail);color:var(--railink);padding:14px 0 10px;display:flex;flex-direction:column;align-items:center;position:sticky;top:0;height:calc(100vh / var(--z,1));overflow:auto}
 @font-face{font-family:BRuqaa;src:url(/font/ArefRuqaa-Bold.ttf) format('truetype');font-display:swap}
-header .brand{display:flex;align-items:center;gap:8px;margin:0 18px 2px}header .lg{width:56px;height:48px;flex:none}
-header h1{font:700 50px/1.1 BRuqaa,var(--text);margin:0;color:#e3c069}
-header .tagl{font:16px var(--text);color:#c9d6c6;margin:0 22px 18px}
+header .lg{width:60px;height:60px;display:block;margin:0 0 18px;border-radius:12px}
 .ptl{font:700 28px/1.3 var(--text);margin:0 0 14px;color:var(--ink)}.ptl::after{content:'';display:block;width:48px;height:2px;background:var(--gold);margin-top:6px}
-header nav{display:flex;flex-direction:column}
-header nav button{background:none;border:0;color:var(--railink);text-align:right;padding:9px 22px;font-size:15px;cursor:pointer;border-inline-start:3px solid transparent}
+svg.i{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.7;stroke-linecap:round;stroke-linejoin:round;flex:none;vertical-align:-4px}
+header nav{display:flex;flex-direction:column;gap:6px;width:100%;padding:0 8px}
+header nav button{background:none;border:0;color:var(--railink);padding:8px 2px 6px;font-size:13px;line-height:1.4;cursor:pointer;border-radius:10px;display:flex;flex-direction:column;align-items:center;gap:3px;position:relative}
+header nav button svg.i{width:23px;height:23px}
 header nav button:hover{background:#ffffff14}
-header nav button.on{background:var(--bg);color:var(--ink);border-inline-start-color:var(--gold);font-weight:600}
-header .cov{font-size:13px;line-height:1.6;padding:14px 22px 8px;margin-top:auto;color:#c4d0e2}
-header .zm{display:flex;gap:6px;padding:0 22px}
-header .zm button{background:none;color:var(--railink);border:1px solid #ffffff55;border-radius:3px;padding:0 10px;font-size:15px;cursor:pointer}
+header nav button.on{background:#ffffff1f;color:#fff;box-shadow:inset 0 -2px 0 var(--gold)}
+header .zm{display:flex;flex-wrap:wrap;justify-content:center;gap:4px;padding:0 6px;margin-top:auto}
+header .zm button{background:none;color:var(--railink);border:1px solid #ffffff40;border-radius:6px;padding:0 6px;font-size:12px;line-height:1.7;cursor:pointer}
 .panel{display:none;min-width:0}.panel.on{display:block}
 .bar{padding:26px 34px 14px}
 .row{display:flex;gap:10px;flex-wrap:wrap}
@@ -1004,10 +1067,49 @@ details.more summary{cursor:pointer;width:max-content}
 .opts{display:flex;gap:16px;flex-wrap:wrap;margin-top:8px;align-items:center}
 .opts select,.opts input[type=number]{font-size:14px;background:var(--card);border:1px solid var(--line);border-radius:3px}
 .help{font-size:14px;color:var(--mute);margin-top:4px}
-main{display:grid;grid-template-columns:minmax(0,1fr) 260px;gap:34px;padding:10px 34px 34px}
-main>*{min-width:0}
-main>aside{order:2}
-aside{align-self:start;max-height:88vh;overflow:auto;position:sticky;top:10px;padding-inline-start:18px;border-inline-start:1px solid var(--line)}
+/* شاشةُ البحث والقراءة: النتائج ← نصُّ الصفحة ← صورتُها، بلا تنقّل */
+#p-search.on{display:flex;flex-direction:column;height:calc(100vh / var(--z,1) - var(--bh,0px))}
+.sbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:12px 22px;border-bottom:1px solid var(--line);background:var(--card)}
+.sbar form{display:flex;gap:10px;flex:1 1 380px;min-width:0}
+.sbar input[type=text]{flex:1;min-width:0;font:22px/1.4 var(--text);padding:6px 16px;border:1.5px solid var(--gold);border-radius:8px;background:var(--bg)}
+.sbar .btn{border-radius:8px;padding:6px 24px}
+.sbar .cov{font-size:13px;color:var(--mute)}
+.dd{position:relative}.ddp{display:none;position:absolute;top:calc(100% + 4px);inset-inline-start:0;z-index:6;background:var(--card);border:1px solid var(--gold);border-radius:8px;box-shadow:0 6px 18px #0002;padding:10px 14px;width:max-content;max-width:min(440px,86vw)}
+.dd.on>.ddp{display:block}
+.ddgo{border-top:1px solid var(--line);margin:10px -14px -4px;padding:4px 0 0}
+.ddgo button{display:block;width:100%;text-align:right;background:none;border:0;color:var(--acc);padding:6px 14px;font:14px var(--ui);cursor:pointer}
+.ddgo button:hover{background:var(--acc2)}
+.ddp .opts{flex-direction:column;align-items:flex-start;gap:8px;margin:0}
+.btn3{display:inline-flex;align-items:center;gap:6px;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;padding:5px 12px;font-size:14px;cursor:pointer;white-space:nowrap}
+.btn3:hover{border-color:var(--gold)}.btn3:disabled{opacity:.4;cursor:default}
+.btn3.gold{background:var(--gold);border-color:var(--gold);color:#fff;font-weight:600}
+main.rd{flex:1;min-height:0;display:grid;grid-template-columns:260px minmax(0,1fr) minmax(0,1fr);padding:0;gap:0}
+main.rd.noimg{grid-template-columns:260px minmax(0,1fr) 46px}main.rd.nopage{grid-template-columns:260px minmax(0,1fr) 0}
+main.rd>*{min-width:0;min-height:0;overflow:auto}
+#rescol{background:var(--rescol);border-inline-end:1px solid var(--line);padding:14px 12px 24px}
+#rhead{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:0 0 10px;font-weight:600;font-size:15px}
+#rhead .ddp{min-width:230px;max-height:60vh;overflow:auto;font-weight:400}
+#pvcol{padding:16px 26px 34px}
+#imgcol{background:var(--imgcol);border-inline-start:1px solid var(--line);padding:14px 16px 24px}
+.chd{display:flex;align-items:center;gap:8px;margin-bottom:10px}.chd b{flex:1;font:600 15px var(--ui)}
+.ibtn{width:34px;height:34px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:8px;cursor:pointer;padding:0}
+.ibtn:hover{border-color:var(--gold)}
+main.rd.noimg #imgcol{padding:14px 5px}main.rd.noimg #imgcol .chd b,main.rd.noimg #imgcol .zbtn,main.rd.noimg #pvimgw{display:none}
+main.rd.nopage #imgcol{display:none}
+/* تصفّحُ الكتاب وحده: الصفحةُ وصورتُها بعرض الشاشة */
+#p-search.read .sbar,#p-search.read #rescol,#p-search.read #rtabs [data-tab=res]{display:none}
+#p-search.read main.rd{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}#p-search.read main.rd.noimg{grid-template-columns:minmax(0,1fr) 46px}
+#p-search.read main.rd.nopage{grid-template-columns:minmax(0,1fr)}#p-search.read main.rd.nopage #pvwrap{max-width:60em;margin:0 auto}
+#p-search.read #pvcol{padding-inline:34px}
+/* قبل أوّل بحث: شاشةٌ واحدةٌ بلا أعمدة، فيها الإرشاد وما ينفع (آخرُ ما بُحث عنه، والمجموعات، والمكتبة) */
+main.rd.start,main.rd.start.nopage{display:block}main.rd.start #rescol,main.rd.start #imgcol,main.rd.start #pvempty{display:none}
+#pvstart{display:none;max-width:780px;margin:0 auto;padding:26px 6px}main.rd.start #pvstart{display:block}
+body:has(main.rd.start) #rtabs{display:none}
+#pvstart .lead{font-size:15px;color:var(--mute);line-height:1.8;margin-bottom:18px}
+#pvstart .sbox{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:12px 16px;margin-bottom:12px}
+#pvstart .sbox h3{font:600 15px var(--ui);margin:0 0 8px}
+#pvstart .chip{font:17px/1.6 var(--text);margin:3px;padding:2px 14px}#pvstart .chip:hover{border-color:var(--gold)}
+.tabs{display:none}
 aside h3{font-size:14px;font-weight:600;margin:0 0 6px}
 .bk{display:flex;gap:6px;font-size:14px;line-height:1.5;padding:5px 0;cursor:pointer}
 .bk .t{flex:1}.bk .c{color:var(--acc);font-weight:600}
@@ -1035,27 +1137,53 @@ mark{background:var(--mark);color:inherit;padding:0 2px;border-radius:2px}
 .acts{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
 .err{color:var(--err)}.muted{color:var(--mute)}
 .wait{color:var(--mute);padding:34px 0;font-size:15px}
-#pv{display:none;position:fixed;inset:0;background:#0b1422cc;padding:14px;overflow:auto;z-index:5;grid-column:auto}
-#pv .box{background:var(--card);border-radius:4px;max-width:1500px;margin:auto;padding:10px 20px 20px}
-#pv .top{display:flex;gap:8px;align-items:center;flex-wrap:wrap;border-bottom:1px solid var(--line);padding:6px 0 10px;position:sticky;top:-14px;background:var(--card);z-index:1}
-#pv .top b{font:700 21px/1.4 var(--text);color:var(--rub);flex:1 1 100%;min-width:0}
-#pv .two{display:grid;grid-template-columns:var(--cols,minmax(0,1fr));gap:18px;margin-top:12px;justify-content:center}
-#pvtoc{font-size:13px;line-height:1.5;position:sticky;top:48px;align-self:start;max-height:calc(100vh / var(--z,1) - 60px);overflow:auto;padding-inline-end:10px;border-inline-end:1px solid var(--line)}
-#pvtoc h3{font-size:13px;margin:0 0 6px;color:var(--acc)}
-#pvtoc div{padding:3px 6px;cursor:pointer;border-radius:2px}#pvtoc div:hover{background:var(--acc2)}#pvtoc div.cur{background:var(--mark)}
+.rc{background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 12px 9px;margin-bottom:8px;cursor:pointer}
+.rc:hover{border-color:var(--gold)}.rc.cur{border:1.5px solid var(--gold);padding:7.5px 11.5px 8.5px}
+.rc .sn{font:18px/1.75 var(--text);margin:0 0 4px;max-width:none;display:-webkit-box;-webkit-line-clamp:4;-webkit-box-orient:vertical;overflow:hidden}
+.rc .rcite{font:600 13px/1.6 var(--ui);color:var(--rub);overflow-wrap:anywhere}
+.rc .tag{font-size:11px;margin:2px 4px 0 0;padding:0 6px}
+.rmore{width:100%;margin-top:4px}
+.pvempty{color:var(--mute);padding:48px 6px;font-size:15px;text-align:center}
+.pvtop{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+#pvcite{font:700 21px/1.4 var(--text);color:var(--ink);flex:1 1 220px;min-width:0}
+#pvcite .nw{font:400 13px var(--ui);color:var(--mute)}
+.pnav{display:flex;align-items:center;gap:8px}
+.pnav .pos{font-size:14px;color:var(--mute);white-space:nowrap;display:flex;align-items:center;gap:4px}
+#pvgo{width:3.6em;font-size:14px;padding:0 4px;border:1px solid transparent;border-radius:6px;background:none;text-align:center;color:var(--ink)}
+#pvgo:hover,#pvgo:focus{border-color:var(--line);background:var(--card)}
+#pvgo::-webkit-inner-spin-button{display:none}
+#pvmore .ddp{inset-inline-start:auto;inset-inline-end:0;min-width:210px;padding:4px 0}
+#pvmore .ddp button{display:flex;align-items:center;gap:8px;width:100%;text-align:right;background:none;border:0;color:var(--ink);padding:7px 14px;font:14px var(--ui);cursor:pointer}
+#pvmore .ddp button:hover{background:var(--acc2)}#pvmore .ddp button:disabled{opacity:.4;cursor:default}
+#pvtocw .ddp{max-height:60vh;overflow:auto;min-width:240px;font-size:14px;line-height:1.5}
+#pvtoc div{padding:3px 6px;cursor:pointer;border-radius:4px}#pvtoc div:hover{background:var(--acc2)}#pvtoc div.cur{background:var(--mark)}
+.weak{display:flex;align-items:center;gap:10px;background:var(--weak);border:1px solid var(--doubt);border-radius:8px;padding:8px 12px;margin-bottom:10px;font-size:14px;line-height:1.6}
+.weak>span{flex:1}.weak svg.i{color:var(--doubt)}
 #pv .txt{font:23px/2 var(--text);white-space:pre-wrap;overflow-wrap:anywhere}
-#pv .foot{border-top:1px solid var(--line);margin-top:12px;padding-top:8px;font:19px/1.8 var(--text);color:var(--foot);white-space:pre-wrap}
+.pvacts{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0 4px}
+#pv .foot{border-top:1px solid var(--line);margin-top:18px;padding-top:8px;font:19px/1.8 var(--text);color:var(--foot);white-space:pre-wrap}
 #pv .foot b{font:600 13px var(--ui)}
 #pv .head{font-size:14px;color:var(--mute)}
-#pv img{width:100%;border:1px solid var(--line);display:block}
-#pv .imgwrap{position:relative}
+#pvimgw img{width:100%;border:1px solid var(--line);display:block;background:#fff}
+#pvimgw .imgwrap{position:relative;width:calc(100% * var(--iz,1))}
 #pv .wbox{position:absolute;pointer-events:none;border-radius:2px}
-#pv .wbox.dqb{border:1.5px solid #d9822b;background:#f5b04a22}
-#pv .wbox.curb{border:2.5px solid #c0392b;background:#f1dc9a66}
+#pv .wbox.dqb{border:1.5px dashed var(--doubt)}
+#pv .wbox.curb{border:2.5px solid var(--doubt);background:#c9621a26}
 #pv .wd{cursor:pointer;border-radius:2px}#pv .wd:hover{background:var(--acc2)}
-#pv .wd.dq{text-decoration:underline wavy #d9822b;text-underline-offset:6px}
-#pv .wd.on{background:var(--mark)}
-#pvimgw{position:sticky;top:48px;align-self:start;max-height:calc(100vh / var(--z,1) - 60px);overflow:auto}
+#pv .wd.dq{text-decoration:underline wavy var(--doubt);text-underline-offset:6px}
+#pv .wd.on{background:var(--mark);outline:1.5px solid var(--doubt)}
+#pv .wd.fx{text-decoration:underline solid var(--fixed) 2px;text-underline-offset:7px}
+#wcard{border:1.5px solid var(--doubt);border-radius:10px;background:var(--card);padding:12px 16px 10px;margin:10px 0 4px;font-size:14px}
+.wtop{display:flex;align-items:flex-start;gap:10px}.wtop b{font:700 22px/1.4 var(--text);color:var(--doubt);white-space:nowrap}
+.wtop .wwhy{flex:1;padding-top:4px;line-height:1.6}.wtop .ibtn{width:28px;height:28px;font-size:13px}
+.wrow{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-top:10px}
+.wclip{display:inline-flex;border:1px solid var(--line);border-radius:6px;padding:3px;background:#fff;min-height:30px;min-width:60px;align-items:center;justify-content:center}
+.wclip canvas{display:block;max-width:100%}
+.wsug{font:700 20px/1.3 var(--text);border:1.5px solid var(--fixed);color:var(--fixed);background:var(--acc2);border-radius:8px;padding:3px 16px;cursor:pointer}
+.wfix input{flex:1 1 180px;min-width:0;font:20px/1.4 var(--text);padding:5px 12px;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink)}
+.wfix .btn{border-radius:8px;padding:6px 20px}
+.wfoot{margin-top:10px;font-size:12.5px;line-height:1.7;color:var(--mute)}
+.tag.fixt{color:var(--fixed);border-color:var(--fixed)}
 #pvayat h3{font:600 15px var(--ui);margin:18px 0 2px;padding-top:12px;border-top:1px solid var(--line)}
 .ayb{padding:9px 0;border-bottom:1px solid var(--line)}
 .ay{margin:4px 0}.aytxt{font:22px/1.9 var(--text)}.ay b{font-size:13px;color:var(--rub);white-space:nowrap}
@@ -1082,8 +1210,8 @@ pre{white-space:pre-wrap;font:inherit;margin:0}
 #dz .acts{font:16px var(--ui)}
 .v{display:inline-block;border-radius:3px;padding:0 8px;font-size:14px;white-space:nowrap}
 .v-ok{background:#c9ecd0;color:#123f1b}.v-warn{background:#f8e7a4;color:#4f3d05}.v-alt{background:#f9dcc9;color:#6c2d00}.v-bad{background:#f3c0ae;color:#6c1800}.v-gray{background:#e3e6ea;color:#333}
-header .ver{display:flex;align-items:center;justify-content:space-between;gap:6px;padding:10px 22px 0;font-size:12px;color:#c9d6c9}
-header .ver button{width:24px;height:24px;border-radius:50%;border:1.5px solid var(--gold);background:none;color:#fff;font:italic 700 14px Georgia,serif;cursor:pointer;padding:0}
+header .ver{display:flex;flex-direction:column;align-items:center;padding:10px 4px 0;font-size:12px;line-height:1.5;color:#c9d6c9;text-align:center}
+header .ver button{background:none;border:0;color:#e9e2c8;font:12px var(--ui);cursor:pointer;padding:2px 4px;text-decoration:underline dotted;text-underline-offset:3px}
 #about{display:none;position:fixed;inset:0;background:#0a1a14cc;z-index:6;align-items:center;justify-content:center;padding:16px;grid-column:auto}
 #about.on{display:flex}
 #ren{display:none;position:fixed;inset:0;background:#0a1a14cc;z-index:7;align-items:center;justify-content:center;padding:16px;grid-column:auto}
@@ -1137,17 +1265,53 @@ header .ver button{width:24px;height:24px;border-radius:50%;border:1.5px solid v
 #dqe{display:none;position:fixed;inset:0;background:#0a1a14cc;z-index:7;align-items:center;justify-content:center;padding:16px;grid-column:auto}#dqe.on{display:flex}
 #dqe .abox{background:var(--card);border:1px solid var(--gold);border-radius:3px;padding:18px 22px;width:100%;max-width:640px}
 #dqe textarea{width:100%;box-sizing:border-box;font:21px/1.8 var(--text);margin:8px 0;padding:6px 10px;border:1px solid var(--line);border-radius:3px;background:var(--bg);color:var(--ink)}
-#nvd i{font-style:normal;font-size:12px;background:var(--gold);color:#1b1b12;border-radius:9px;padding:0 6px;margin-inline-start:6px}
+#nvd i{font-style:normal;font-size:11px;line-height:1.5;background:var(--gold);color:#1b1b12;border-radius:9px;padding:0 5px;position:absolute;top:2px;inset-inline-end:4px}
+/* أضيقُ من نحو ١٢٠٠: الصورةُ تحت النصّ، والنتائجُ في عمودها */
+@media(max-width:1200px){
+ #p-search.read main.rd,#p-search.read main.rd.noimg,#p-search.read main.rd.nopage{grid-template-columns:minmax(0,1fr)}#p-search.read #imgcol{grid-column:1}
+ main.rd,main.rd.noimg,main.rd.nopage{grid-template-columns:240px minmax(0,1fr);grid-template-rows:max-content max-content;overflow:auto;align-content:start}
+ main.rd>*{overflow:visible}
+ #rescol{grid-row:1/span 2;position:sticky;top:0;align-self:start;height:calc(100vh / var(--z,1) - 72px);overflow:auto!important}
+ #imgcol{grid-column:2;border-inline-start:0;border-top:1px solid var(--line)}
+ main.rd.noimg #imgcol{padding:8px 16px}main.rd.noimg #imgcol .chd{margin:0}main.rd.noimg #imgcol .chd b{display:block}}
+/* عرضُ الجوّال: الشريطُ أعلى الشاشة، والأعمدةُ الثلاثة يُختار أحدُها */
 @media(max-width:860px){body{display:block}
- header{position:static;height:auto;padding:12px 0 6px}header h1{font-size:40px;margin:0 16px 8px}
- header nav{flex-direction:row;flex-wrap:wrap}header nav button{padding:4px 12px;border-inline-start:0;border-bottom:3px solid transparent}header nav button.on{border-bottom-color:var(--gold)}
- header .cov{padding:6px 16px}header .zm{padding:0 16px}
- .bar,.wrap{padding-inline:16px}main{grid-template-columns:1fr;padding-inline:16px}main>aside{order:0;position:static;max-height:34vh;border:0;padding:0}
- #pv .two{--cols:minmax(0,1fr)!important;grid-template-columns:minmax(0,1fr)}#pvtoc{display:none!important}.cols{grid-template-columns:1fr}.banner{padding-inline:16px}.shelf{grid-template-columns:repeat(auto-fill,140px)}.cover{height:190px}}
+ header{position:static;height:auto;flex-direction:row;flex-wrap:wrap;align-items:center;padding:6px 8px;gap:4px}
+ header .lg{width:40px;height:40px;margin:0 4px}
+ header nav{flex-direction:row;width:auto;flex:1;padding:0;gap:2px}header nav button{flex:1;padding:4px 2px;font-size:12px}
+ header .zm{margin:0;padding:0}header .ver{flex-direction:row;gap:6px;padding:0 4px}
+ #p-search.on{height:auto;position:static}.sbar{padding:10px 16px}.sbar form{flex-basis:100%}
+ main.rd,main.rd.noimg,main.rd.nopage{display:block;overflow:visible}
+ .tabs{display:flex;margin:10px 16px 0;border:1px solid var(--line);border-radius:8px;overflow:hidden}
+ .tabs button{flex:1;background:var(--card);border:0;color:var(--ink);padding:6px 4px;font:14px var(--ui);cursor:pointer}.tabs button.on{background:var(--rail);color:#fff}
+ #rescol{position:static;height:auto;border:0;background:none;padding:12px 16px}#pvcol{padding:12px 16px 28px}#imgcol{border:0;padding:12px 16px}
+ main.rd[data-tab=res] #pvcol,main.rd[data-tab=res] #imgcol,main.rd[data-tab=txt] #rescol,main.rd[data-tab=txt] #imgcol,main.rd[data-tab=img] #rescol,main.rd[data-tab=img] #pvcol{display:none}
+ main.rd.noimg #pvimgw{display:block}main.rd.noimg #imgcol .zbtn{display:inline-flex}#imgfold{display:none}
+ #pv .txt{font-size:21px}
+ .wrap{padding-inline:16px}.cols{grid-template-columns:1fr}.banner{padding-inline:16px}.shelf{grid-template-columns:repeat(auto-fill,140px)}.cover{height:190px}}
 </style></head><body>
-<header><div class="brand"><svg class="lg" viewBox="10 22 108 90" aria-hidden="true"><path d="M16 40 Q40 30 64 40 L64 102 Q40 92 16 102Z" fill="#f3ead3"/><path d="M112 40 Q88 30 64 40 L64 102 Q88 92 112 102Z" fill="#e8dcbc"/><path d="M24 54 Q40 49 56 54M24 64 Q40 59 56 64M24 74 Q40 69 56 74M24 84 Q40 79 56 84" stroke="#c9b98f" stroke-width="2.5" fill="none"/><circle cx="84" cy="68" r="22" fill="#fbf5e6" stroke="#d6a943" stroke-width="6"/><path d="M100 84 L112 96" stroke="#d6a943" stroke-width="9" stroke-linecap="round"/></svg><h1>بُغية</h1></div><div class="tagl">باحثٌ في مكتبتك</div>
-<nav><button data-p="search" class="on">البحث</button><button data-p="books">كتبي</button><button data-p="welcome">أضف كتبًا</button><button data-p="draft" id="nvd">المسودة<i id="dcount" style="display:none"></i></button><button data-p="audit">مدقّق الإحالات</button><button data-p="jiwar">ألفاظٌ مجاورة</button><button data-p="groups">مجموعات الألفاظ</button><button data-p="status">حال المكتبة</button></nav>
-<span class="cov" id="cov"></span><span class="zm"><button type="button" id="zdn" title="تصغير الخطّ">أ−</button><button type="button" id="zup" title="تكبير الخطّ">أ+</button><button type="button" id="thm" title="المظهر: تلقائيّ (كويندوز) ← نهاريّ ← ليليّ">تلقائي</button></span><script>(function(){var k="bughya-zoom",z=1.1;try{var v=parseFloat(localStorage.getItem(k));if(v)z=v}catch(e){}function set(v){z=Math.min(2.2,Math.max(0.8,Math.round(v*100)/100));document.documentElement.style.zoom=z;document.documentElement.style.setProperty('--z',z);try{localStorage.setItem(k,z)}catch(e){}}set(z);document.getElementById("zup").onclick=function(){set(z+0.1)};document.getElementById("zdn").onclick=function(){set(z-0.1)}})()</script><div class="ver"><span>الإصدار __VER__</span><button type="button" id="abt" aria-label="عن البرنامج" title="عن البرنامج">i</button></div></header>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true"><defs>
+<symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/></symbol>
+<symbol id="i-books" viewBox="0 0 24 24"><rect x="3.5" y="4" width="4" height="16" rx="1"/><rect x="9" y="4" width="4" height="16" rx="1"/><path d="M15.2 6.3l3.4-.9 3.3 13.3-3.4.9z"/></symbol>
+<symbol id="i-audit" viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/><path d="M9.6 14.2l2.1 2.1 3.9-4.3"/></symbol>
+<symbol id="i-draft" viewBox="0 0 24 24"><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 013 3L8 19z"/><path d="M14.5 6.5l3 3"/><path d="M13 20h7"/></symbol>
+<symbol id="i-copy" viewBox="0 0 24 24"><rect x="8" y="8" width="12" height="12" rx="2"/><path d="M16 8V6a2 2 0 00-2-2H6a2 2 0 00-2 2v8a2 2 0 002 2h2"/></symbol>
+<symbol id="i-warn" viewBox="0 0 24 24"><path d="M12 4l9 16H3z"/><path d="M12 10v4.5"/><path d="M12 17.3h.01"/></symbol>
+<symbol id="i-image" viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="2"/><circle cx="9.5" cy="9.5" r="1.6"/><path d="M20 15.5L15.5 11 6 20"/></symbol>
+<symbol id="i-toc" viewBox="0 0 24 24"><path d="M9 6.5h11M9 12h11M9 17.5h11"/><path d="M4.5 6.5h.01M4.5 12h.01M4.5 17.5h.01"/></symbol>
+<symbol id="i-scan" viewBox="0 0 24 24"><path d="M4 8.5V6a2 2 0 012-2h2.5M15.5 4H18a2 2 0 012 2v2.5M20 15.5V18a2 2 0 01-2 2h-2.5M8.5 20H6a2 2 0 01-2-2v-2.5"/><path d="M4 12h16"/></symbol>
+<symbol id="i-doc" viewBox="0 0 24 24"><path d="M7 3h7l4 4v14H7z"/><path d="M14 3v4h4"/><path d="M9.5 12h6M9.5 15h6M9.5 18h4"/></symbol>
+<symbol id="i-zin" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/><path d="M11 8.5v5M8.5 11h5"/></symbol>
+<symbol id="i-zout" viewBox="0 0 24 24"><circle cx="11" cy="11" r="6.5"/><path d="M16 16l4.5 4.5"/><path d="M8.5 11h5"/></symbol>
+<symbol id="i-prev" viewBox="0 0 24 24"><path d="M9.5 6l6 6-6 6"/></symbol>
+<symbol id="i-next" viewBox="0 0 24 24"><path d="M14.5 6l-6 6 6 6"/></symbol>
+<symbol id="i-more" viewBox="0 0 24 24"><path d="M5.5 12h.01M12 12h.01M18.5 12h.01" stroke-width="3"/></symbol>
+<symbol id="i-fold" viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/><path d="M20 4v16"/></symbol>
+<symbol id="i-unfold" viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/><path d="M4 4v16"/></symbol>
+</defs></svg>
+<header><img class="lg" src="/icon.png" alt="بُغية">
+<nav><button data-p="search" class="on"><svg class="i"><use href="#i-search"/></svg>بحث</button><button data-p="books"><svg class="i"><use href="#i-books"/></svg>كتبي</button><button data-p="audit"><svg class="i"><use href="#i-audit"/></svg>المدقّق</button><button data-p="draft" id="nvd"><svg class="i"><use href="#i-draft"/></svg>المسودة<i id="dcount" style="display:none"></i></button></nav>
+<span class="zm"><button type="button" id="zdn" title="تصغير الخطّ">أ−</button><button type="button" id="zup" title="تكبير الخطّ">أ+</button><button type="button" id="thm" title="المظهر: تلقائيّ (كويندوز) ← نهاريّ ← ليليّ">تلقائي</button></span><script>(function(){var k="bughya-zoom",z=1.1;try{var v=parseFloat(localStorage.getItem(k));if(v)z=v}catch(e){}function set(v){z=Math.min(2.2,Math.max(0.8,Math.round(v*100)/100));document.documentElement.style.zoom=z;document.documentElement.style.setProperty('--z',z);try{localStorage.setItem(k,z)}catch(e){}}set(z);document.getElementById("zup").onclick=function(){set(z+0.1)};document.getElementById("zdn").onclick=function(){set(z-0.1)}})()</script><div class="ver"><span>__VER__</span><button type="button" id="abt" title="عن البرنامج">عن البرنامج</button></div></header>
 <div id="about" role="dialog" aria-modal="true" aria-label="عن البرنامج"><div class="abox">
 <div class="ahd"><img src="/icon.png" alt="" width="52" height="52"><div><div class="t1">بُغية</div><div class="muted">الإصدار __VER__</div></div></div>
 <div class="asec"><span class="muted">تطوير</span><br><span class="t2" dir="ltr">Omar Elmnfi</span></div>
@@ -1183,8 +1347,8 @@ header .ver button{width:24px;height:24px;border-radius:50%;border:1.5px solid v
 
 <!-- ═════ البحث ═════ -->
 <section class="panel on" id="p-search">
-<div class="bar"><form id="sf" class="row"><input type="text" id="q" placeholder="ابحث في كتبك" autofocus><button class="btn">ابحث</button></form>
-<details class="more"><summary>خيارات البحث</summary><div class="opts">
+<div class="sbar"><form id="sf"><input type="text" id="q" placeholder="ابحث في كتبك" autofocus><button class="btn">ابحث</button></form>
+<span class="dd" id="optw"><button type="button" class="btn3" id="optb" aria-haspopup="true"><span id="optl">عبارةٌ متتالية</span> ▾</button><div class="ddp"><div class="opts">
 <label>نوع البحث <select id="mode"><option value="phrase">عبارةٌ متتالية</option><option value="words">كلماتٌ مجتمعة في الصفحة</option><option value="any">أيُّ كلمةٍ منها</option><option value="near">كلمتان متقاربتان</option><option value="query">صيغةُ المتمرّس</option></select></label>
 <label id="distw" style="display:none">بينهما <input type="number" id="dist" value="10" min="1" max="60" style="width:52px"> كلمة فأقلّ</label>
 <label>في صنف <select id="fann"><option value="">كلّ الأصناف</option></select></label>
@@ -1193,9 +1357,32 @@ header .ver button{width:24px;height:24px;border-radius:50%;border:1.5px solid v
 <label title="يجد الكلمة وإن أخطأت القراءةُ الآليّة في نقاطها"><input type="checkbox" id="rasm"> تسامحٌ مع أخطاء النقاط</label>
 <label>الترتيب <select id="order"><option value="rank">الأقرب صلة</option><option value="book">بالكتاب والصفحة</option></select></label>
 </div>
-<div class="help" id="mhelp"></div></details></div>
-<main><aside id="facet"><h3>الكتب</h3><div class="muted" style="font-size:14px">تظهر هنا الكتبُ التي ورد فيها ما تبحث عنه، فتحصر البحثَ فيما تختار منها.</div></aside>
-<section id="results"><div class="wait">اكتب ما تبحث عنه ثمّ «ابحث».<br><span style="font-size:14px">البحثُ بالكلمة وسوابقها (و، ف، ب، ك، ل، ال) لا بالجذر؛ والنجمةُ في صيغة المتمرّس بادئة: <b>صلا*</b></span></div></section></main>
+<div class="help" id="mhelp"></div>
+<div class="ddgo"><button type="button" data-go="jiwar">ألفاظٌ مجاورة</button><button type="button" data-go="groups">مجموعات الألفاظ</button></div></div></span>
+<span class="cov" id="cov"></span></div>
+<div class="tabs" id="rtabs"><button type="button" data-tab="res" class="on">النتائج</button><button type="button" data-tab="txt">النصّ</button><button type="button" data-tab="img">الصورة</button></div>
+<main class="rd nopage start" id="pv" data-tab="res">
+<aside id="rescol"><div id="rhead"><span id="rsum"></span><span class="dd" id="facetw" style="display:none"><button type="button" class="btn3" id="facetb"></button><div class="ddp" id="facet"></div></span></div><section id="results"><div class="wait">اكتب ما تبحث عنه ثمّ «ابحث».<br><span style="font-size:14px">البحثُ بالكلمة وسوابقها (و، ف، ب، ك، ل، ال) لا بالجذر؛ والنجمةُ في صيغة المتمرّس بادئة: <b>صلا*</b></span></div></section></aside>
+<section id="pvcol"><div class="pvempty" id="pvempty">اختر نتيجةً لتقرأ صفحتها هنا، وصورتُها بجانبها.</div><div id="pvstart"></div>
+<div id="pvwrap" style="display:none">
+<div class="pvtop"><button type="button" class="btn3" id="pvback" style="display:none"><svg class="i"><use href="#i-prev"/></svg><span>رجوع</span></button><div id="pvcite"></div>
+<div class="pnav"><button type="button" class="btn3" id="pvprev" title="السهم الأيمن"><svg class="i"><use href="#i-prev"/></svg>السابقة</button>
+<span class="pos"><input type="number" id="pvgo" min="1" title="اكتب رقمَ صفحةٍ ثمّ Enter"><span id="pvtot"></span></span>
+<button type="button" class="btn3" id="pvnext" title="السهم الأيسر">التالية<svg class="i"><use href="#i-next"/></svg></button></div>
+<button type="button" class="btn3" id="pvsearch2" style="display:none"><svg class="i"><use href="#i-search"/></svg>ابحث في هذا الكتاب</button>
+<span class="dd" id="pvtocw" style="display:none"><button type="button" class="ibtn" id="pvtocb" title="الفهرس" aria-label="الفهرس"><svg class="i"><use href="#i-toc"/></svg></button><div class="ddp" id="pvtoc"></div></span>
+<span class="dd" id="pvmore"><button type="button" class="ibtn" id="pvmoreb" title="المزيد" aria-label="المزيد"><svg class="i"><use href="#i-more"/></svg></button><div class="ddp">
+<button type="button" id="pvsearch"><svg class="i"><use href="#i-search"/></svg>ابحث في هذا الكتاب</button>
+<button type="button" id="pvflow" title="العرضُ وحده يتغيّر، لا نصُّ الكتاب"></button>
+<button type="button" id="pvcover"><svg class="i"><use href="#i-image"/></svg>اجعلها غلاف الكتاب</button>
+<button type="button" id="pvren"><svg class="i"><use href="#i-doc"/></svg>بيانات الكتاب</button></div></span></div>
+<div class="head" id="pvhead"></div><div id="pvweak"></div><div class="note" id="pvnote"></div><div class="txt" id="pvbody"></div>
+<div class="pvacts"><button type="button" class="btn3 gold" id="pvadd">+ أضف الصفحة إلى المسودة</button><button type="button" class="btn3" id="pvcopy"><svg class="i"><use href="#i-copy"/></svg><span>انسخ الصفحة بالعزو</span></button><span id="pvmeth" class="tag"></span></div>
+<div id="wcard" style="display:none" role="dialog" aria-label="الكلمة وتصحيحها"></div>
+<div class="foot" id="pvfoot"></div><div id="pvayat"></div></div></section>
+<aside id="imgcol"><div class="chd"><b>صورة الصفحة</b><button type="button" class="ibtn zbtn" id="zimgout" title="صغّر الصورة" aria-label="صغّر الصورة"><svg class="i"><use href="#i-zout"/></svg></button><button type="button" class="ibtn zbtn" id="zimgin" title="كبّر الصورة" aria-label="كبّر الصورة"><svg class="i"><use href="#i-zin"/></svg></button><button type="button" class="ibtn" id="imgfold" title="اطوِ الصورة فيتّسع النصّ" aria-label="اطوِ الصورة"><svg class="i"><use href="#i-fold"/></svg></button></div>
+<div id="pvimgw"></div></aside>
+</main>
 </section>
 
 <!-- ═════ المسوّدة ═════ -->
@@ -1234,6 +1421,7 @@ header .ver button{width:24px;height:24px;border-radius:50%;border:1.5px solid v
 
 <!-- ═════ الكتب ═════ -->
 <section class="panel" id="p-books"><div class="wrap">
+<div class="row" style="margin:-4px 0 16px;align-items:center"><button type="button" class="btn3 gold" data-go="welcome">+ أضف كتبًا</button><button type="button" class="btn3" data-go="status">حال المكتبة</button></div>
 <div class="row" style="margin-bottom:20px;align-items:center"><input type="text" id="bf" placeholder="صفِّ بالعنوان أو المؤلّف" style="flex:1;max-width:420px;padding:5px 12px;border:1px solid var(--line);border-radius:3px;background:var(--card)"><span class="muted" id="bcount"></span></div>
 <div class="chips" id="bchips"></div>
 <div class="shelf" id="btab"></div></div></section>
@@ -1245,14 +1433,6 @@ header .ver button{width:24px;height:24px;border-radius:50%;border:1.5px solid v
 <div class="help">يقرأ ما جدّ من الكتب في مجلّداتك، ويُكمل ما لم تكتمل قراءتُه، في الخلفيّة. والبحثُ يعمل فيما قُرئ ريثما تكتمل. والكتبُ المصوَّرة تأخذ وقتًا.</div>
 <pre id="utext" class="muted"></pre></div></div></section>
 
-<!-- ═════ عارضُ الصفحة ═════ -->
-<div id="pv"><div class="box"><div class="top"><b id="pvcite"></b>
-<span id="pvmeth" class="tag"></span>
-<button class="btn2" id="pvprev">‹ السابقة</button><input type="number" id="pvgo" min="1" style="width:70px;font-size:15px;padding:0 6px;border:1px solid var(--line);border-radius:6px;background:var(--bg)" title="رقمُ الصفحة ثمّ Enter"><span class="muted" id="pvtot"></span><button class="btn2" id="pvnext">التالية ›</button>
-<button class="btn2" id="pvimg">صورةُ الصفحة</button><button class="btn2" id="pvcopy">انسخ المحدَّد مع عزوه</button><button class="btn2" id="pvadd">+ أضف المحدَّد إلى المسودة</button><button class="btn2" id="pvsearch">ابحث في هذا الكتاب</button>
-<button class="btn2" id="pvflow" title="العرضُ وحده يتغيّر، لا نصُّ الكتاب"></button><button class="btn2" id="pvcover">اجعلها غلاف الكتاب</button><button class="btn2" id="pvren">بيانات الكتاب</button><button class="btn2" id="pvclose">إغلاق ✕</button></div>
-<div class="two one" id="pvtwo"><aside id="pvtoc" style="display:none"></aside><div><div class="head" id="pvhead"></div><div class="note" id="pvnote"></div><div class="txt" id="pvbody"></div><div class="foot" id="pvfoot"></div><div id="pvayat"></div></div>
-<div id="pvimgw" style="display:none"></div></div></div></div>
 <div id="ren" role="dialog" aria-modal="true" aria-label="بيانات الكتاب"><div class="abox">
 <b style="font:700 22px var(--text)">بياناتُ الكتاب</b> <span class="muted" id="renid"></span>
 <div class="help">اكتبها من صفحة عنوان الكتاب. وتظهر في النتائج والعزو بدل اسم الملفّ، ولا يتغيّر الملفّ نفسه.</div>
@@ -1277,8 +1457,16 @@ setInterval(()=>fetch('/api/ping').catch(()=>{}),20000);
 
 // ── التبويبات
 document.querySelectorAll('header nav button').forEach(b=>b.onclick=()=>show(b.dataset.p));
+document.querySelectorAll('[data-go]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.dd.on').forEach(x=>x.classList.remove('on'));show(b.dataset.go)});
+// أشرطةُ التنبيه فوق الشاشات (التحديث، القراءة الآليّة، تقدّمُ القراءة) تأخذ من ارتفاع شاشة البحث، فلا يخرج أسفلُ أعمدتها عن النافذة
+(function(){const bars=['#updbar','#ocrbar','#progbar'].map(s=>$(s)).filter(Boolean);
+  const fit=()=>document.documentElement.style.setProperty('--bh',bars.reduce((h,b)=>h+b.offsetHeight,0)+'px');
+  if(window.ResizeObserver){const ro=new ResizeObserver(fit);bars.forEach(b=>ro.observe(b))}fit()})();
+// الشاشاتُ التي ليس لها قسمٌ في الشريط تُعلِّم القسمَ الذي تُفتح منه
+const NAVOF={welcome:'books',status:'books',jiwar:'search',groups:'search'};
 function show(p){
-  document.querySelectorAll('header nav button').forEach(x=>x.classList.toggle('on',x.dataset.p==p));
+  if(p=='search'&&READ){READ=null;setRead()}
+  document.querySelectorAll('header nav button').forEach(x=>x.classList.toggle('on',x.dataset.p==(NAVOF[p]||p)));
   document.querySelectorAll('.panel').forEach(x=>x.classList.toggle('on',x.id=='p-'+p));
   if(p=='books')loadBooks(); if(p=='status')loadStatus(); if(p=='groups')loadGroups(); if(p=='welcome')loadSources(); if(p=='draft')loadDrafts();
 }
@@ -1290,12 +1478,27 @@ const HELP={phrase:'العبارةُ كما تكتبها، كلماتُها مت
  query:'للمتمرّس: AND و OR و NOT و NEAR، والنجمةُ بادئة (صلا*)، والعبارةُ بين علامتي تنصيص. مثل: "خبر الواحد" AND العقيده',
  group:'مجموعةُ ألفاظ: كلُّ لفظٍ مع سوابقه، وأيُّها ورد.'};
 const S={q:'',mode:'phrase',books:new Set(),offset:0,facet:[],total:0,params:null,results:[]};
-$('#mode').onchange=()=>{$('#distw').style.display=$('#mode').value=='near'?'':'none';$('#mhelp').textContent=HELP[$('#mode').value]};
+$('#mode').onchange=()=>{$('#distw').style.display=$('#mode').value=='near'?'':'none';$('#mhelp').textContent=HELP[$('#mode').value];
+  $('#optl').textContent=$('#mode').selectedOptions[0].textContent};
 $('#mhelp').textContent=HELP.phrase;
+// القوائمُ المنسدلة (خيارات البحث، الكتب، الفهرس، المزيد): تُفتح بزرّها، وتُغلق بالضغط خارجها أو بـEsc
+document.querySelectorAll('.dd>button').forEach(b=>b.onclick=e=>{e.stopPropagation();const d=b.parentElement,on=!d.classList.contains('on');
+  document.querySelectorAll('.dd.on').forEach(x=>x.classList.remove('on'));d.classList.toggle('on',on);if(on)fitDD(d)});
+// القائمةُ تُفتح من جهة زرّها؛ فإن خرجت عن النافذة فُتحت من الجهة الأخرى، وإلّا ضاقت
+function fitDD(d){const p=d.querySelector('.ddp'),e=document.documentElement;p.style.insetInlineStart=p.style.insetInlineEnd=p.style.maxWidth='';
+  const out=()=>{const r=p.getBoundingClientRect();return e.scrollWidth>e.clientWidth||r.left<0};
+  if(!out())return;
+  p.style.insetInlineStart='auto';p.style.insetInlineEnd='0';
+  if(!out())return;
+  p.style.insetInlineStart='0';p.style.insetInlineEnd='';p.style.maxWidth=Math.max(200,d.getBoundingClientRect().right-8)+'px'}
+document.addEventListener('click',e=>{if(!e.target.closest('.ddp'))document.querySelectorAll('.dd.on').forEach(x=>x.classList.remove('on'))});
+document.addEventListener('keydown',e=>{if(e.key=='Escape')document.querySelectorAll('.dd.on').forEach(x=>x.classList.remove('on'))});
+document.querySelectorAll('#pvmore .ddp button').forEach(b=>b.addEventListener('click',()=>$('#pvmore').classList.remove('on')));
 $('#sf').onsubmit=e=>{e.preventDefault();S.books.clear();newSearch($('#q').value,$('#mode').value)};
 ['layer','exact','rasm','order','fann'].forEach(id=>$('#'+id).onchange=()=>{if(S.q)newSearch(S.q,S.mode,true)});
 function newSearch(q,mode,keepBooks){
   q=q.trim(); if(!q)return; S.q=q;S.mode=mode;S.offset=0;S.results=[]; if(!keepBooks)S.books.clear();
+  $('#pv').classList.remove('start');if(mode!='group')remember(q,mode);
   S.params={q,mode,dist:$('#dist').value,layer:$('#layer').value,exact:$('#exact').checked?1:0,rasm:$('#rasm').checked?1:0,order:$('#order').value,fann:$('#fann').value};
   run(true);
 }
@@ -1309,28 +1512,48 @@ async function run(withFacet){
   if(g!=GEN)return;            // بحثٌ أحدثُ منه بدأ
   if(r.error){res.innerHTML='<div class="wait err">'+esc(r.error)+'</div>';return}
   if(r.coverage)setCov(r.coverage);
+  const first=S.offset==0;
   S.total=r.pages;S.bookN=r.books;S.results=S.results.concat(r.results);
   drawResults();
+  if(first&&S.results.length){const x=S.results[0];openPage(x.book_id,x.n,true,true)}   // أوّلُ نتيجةٍ تُفتح وحدها، فلا يبقى عمودُ النصّ فارغًا
 }
+// آخرُ ما بُحث عنه: على هذا الجهاز وحده (في المتصفّح)، ويُضغط فيُبحث به ثانية
+function recent(){try{return JSON.parse(localStorage.getItem('bughya-recent')||'[]')}catch(e){return []}}
+function remember(q,mode){try{const a=recent().filter(x=>!(x.q==q&&x.mode==mode));a.unshift({q,mode});localStorage.setItem('bughya-recent',JSON.stringify(a.slice(0,10)))}catch(e){}}
+async function drawStart(){
+  const w=$('#pvstart'),rec=recent();let gs=[];try{gs=await api('/api/groups')}catch(e){}
+  w.innerHTML='<div class="lead">اكتب ما تبحث عنه ثمّ «ابحث». البحثُ بالكلمة وسوابقها (و، ف، ب، ك، ل، ال) لا بالجذر؛ والنجمةُ في صيغة المتمرّس بادئة: <b>صلا*</b></div>'+
+    (rec.length?'<div class="sbox"><h3>آخرُ ما بحثتَ عنه</h3>'+rec.map((x,i)=>'<button type="button" class="chip" data-rq="'+i+'">'+esc(x.q)+'</button>').join('')+'</div>':'')+
+    (Array.isArray(gs)&&gs.length?'<div class="sbox"><h3>مجموعاتُ ألفاظك</h3>'+gs.map((g,i)=>'<button type="button" class="chip" data-rg="'+i+'" title="'+esc(g.terms.join(' · '))+'">'+esc(g.name)+' <i>'+AR(g.terms.length)+'</i></button>').join('')+'</div>':'')+
+    '<div class="sbox"><h3>مكتبتُك</h3><span id="stcov" class="muted"></span> <button type="button" class="btn2" data-go2="books">كتبي</button></div>';
+  if(COV)$('#stcov').textContent=$('#cov').textContent;else api('/api/coverage').then(c=>{if(!c.error){setCov(c);$('#stcov').textContent=$('#cov').textContent}});
+  w.querySelectorAll('[data-rq]').forEach(b=>b.onclick=()=>{const x=rec[+b.dataset.rq];$('#q').value=x.q;$('#mode').value=x.mode;$('#mode').onchange();newSearch(x.q,x.mode)});
+  w.querySelectorAll('[data-rg]').forEach(b=>b.onclick=()=>{const g=gs[+b.dataset.rg];$('#q').value='مجموعة: '+g.name;$('#mhelp').textContent=HELP.group+' ('+g.terms.join(' · ')+')';newSearch(g.terms.join('\n'),'group')});
+  w.querySelectorAll('[data-go2]').forEach(b=>b.onclick=()=>show(b.dataset.go2));
+}
+drawStart();
 let FGEN=0;
 async function loadFacet(g){
   const fg=++FGEN;
-  $('#facet').innerHTML='<h3>الكتب</h3><div class="muted" style="font-size:14px">تُحصى الكتبُ التي ورد فيها…</div>';
+  $('#facetw').style.display='';$('#facetb').textContent='الكتب تُحصى…';
+  $('#facet').innerHTML='<div class="muted" style="font-size:14px">الكتبُ التي ورد فيها تُحصى…</div>';
   const r=await api('/api/search',Object.assign({},S.params,{facet:'only'}));
   if(fg!=FGEN)return;
-  if(r.error){$('#facet').innerHTML='<h3>الكتب</h3><div class="muted err" style="font-size:14px">'+esc(r.error)+'</div>';return}
+  if(r.error){$('#facetb').textContent='الكتب ▾';$('#facet').innerHTML='<div class="muted err" style="font-size:14px">'+esc(r.error)+'</div>';return}
   S.facet=r.facet||[];drawFacet();
 }
+// قائمةُ الكتب التي ورد فيها ما يُبحث عنه: زرٌّ في رأس النتائج («في ٤ كتب ▾») يفتحها، فيُحصر البحثُ فيما يُختار منها
 function drawFacet(){
-  const f=$('#facet');
-  if(!S.facet.length){f.innerHTML='<h3>الكتب</h3><div class="muted">—</div>';return}
-  f.innerHTML='<h3>الكتب التي ورد فيها ('+AR(S.facet.length)+')</h3><div class="acts" style="margin-bottom:4px"><button class="btn2" id="fall">كلُّها</button></div>'+
+  const f=$('#facet'),n=S.facet.length;
+  $('#facetb').textContent=(S.books.size?'في '+AR(S.books.size)+' من '+AR(n):'في '+AR(n))+' '+(n==1?'كتاب':n==2?'كتابين':n<=10?'كتب':'كتابًا')+' ▾';
+  if(!n){f.innerHTML='<div class="muted">—</div>';return}
+  f.innerHTML='<div class="acts" style="margin-bottom:4px"><b style="flex:1;font-size:14px">احصر البحث في:</b><button class="btn2" id="fall">كلُّها</button></div>'+
    S.facet.map(b=>'<label class="bk"><input type="checkbox" data-b="'+b.book_id+'" '+(S.books.has(b.book_id)?'checked':'')+'> <span class="t">'+
    (b.unclear?'<span class="fname">'+esc(b.title)+'</span>':esc(b.title))+(b.volume?' ج'+AR(b.volume):'')+
    (b.unclear?'<br>'+noTitle(b.book_id):'')+
    (b.author?'<br><span class="muted" style="font-size:12px">'+esc(b.author)+(b.death?' (ت '+esc(b.death)+')':'')+'</span>':'')+
    '</span><span class="c" title="مواضع">'+AR(b.occurrences||b.pages)+'</span></label>').join('');
-  f.querySelectorAll('input[data-b]').forEach(c=>c.onchange=()=>{const id=+c.dataset.b;c.checked?S.books.add(id):S.books.delete(id);S.offset=0;S.results=[];run(false)});
+  f.querySelectorAll('input[data-b]').forEach(c=>c.onchange=()=>{const id=+c.dataset.b;c.checked?S.books.add(id):S.books.delete(id);S.offset=0;S.results=[];drawFacet();run(false)});
   $('#fall').onclick=()=>{S.books.clear();drawFacet();S.offset=0;S.results=[];run(false)};
 }
 function snipHTML(s){return esc(s).replace(/【/g,'<mark>').replace(/】/g,'</mark>').replace(/ ⏎ /g,'<span class="nl"> ⏎ </span>')}
@@ -1343,98 +1566,214 @@ function citeHTML(c,unclear){const m=String(c||'').match(/^(«[^»]*»)\s*(.*)$/
   return m?(unclear?'<span class="fname">'+esc(m[1])+'</span>':esc(m[1]))+(m[2]?' <span class="nw">'+esc(m[2]).replace(/ \(/g,'</span> <span class="nw">(')+'</span>':''):esc(c)}
 function drawResults(){
   const res=$('#results');
+  $('#rsum').textContent=S.results.length?cnt(S.total,'صفحةٌ','صفحتان','صفحات','صفحةً'):'';
   if(!S.results.length){res.innerHTML='<div class="wait">لم أجده في كتبك المقروءة'+covNote()+'.<br><span style="font-size:14px">جرّب «تسامحٌ مع أخطاء النقاط»، أو صيغةً أخرى للكلمة، أو «ألفاظٌ مجاورة».</span></div>';return}
-  const lim=(S.books.size?' (في الكتب المختارة)':'')+(S.params&&S.params.fann?' (في صنف «'+esc(S.params.fann)+'»)':'');
-  let h='<div class="summary">وُجد في '+AR(S.total)+' صفحة من '+AR(S.bookN)+' كتابًا'+lim+' · المعروض '+AR(S.results.length)+covNote()+'</div>';
+  const lim=(S.books.size?' في الكتب المختارة':'')+(S.params&&S.params.fann?' في صنف «'+esc(S.params.fann)+'»':'');
+  let h=lim||covNote()?'<div class="summary">'+lim+covNote()+'</div>':'';
   S.results.forEach((x,i)=>{
-    h+='<div class="card"><div class="cite"><span class="ct" data-open="'+i+'" title="افتح الصفحة">'+citeHTML(x.cite,x.unclear)+'</span> <span class="bid nw">رقم الكتاب '+AR(x.book_id)+'</span>'+
-      (x.unclear?' '+noTitle(x.book_id):'')+'</div>'+
-      '<span class="tag '+(x.layer=='حاشية'?'foot':'')+'">'+esc(x.layer)+''+'</span>'+
-      (x.method=='ocr'?'<span class="tag ocr">قراءةٌ آليّة · قابِل بالصورة قبل النقل</span>':'')+
-      (x.via_ayat?'<span class="tag">لم يُقرأ لفظها سليمًا في الكتاب، وعُرفت بمطابقة الآية: '+esc(x.via_ayat.join('، '))+'</span>':'')+
-      x.snippets.map(s=>'<p class="sn">'+snipHTML(s)+'</p>').join('')+
-      '<div class="acts"><button class="btn2" data-open="'+i+'">افتح الصفحة'+(x.method=='ocr'?' والصورة':'')+'</button><button class="btn2" data-copy="'+i+'">انسخ المقطع مع عزوه</button><button class="btn2" data-dadd="'+i+'">+ أضف إلى المسودة</button></div></div>';
+    h+='<div class="rc'+(x.book_id==PV.b&&x.n==PV.n?' cur':'')+'" data-open="'+i+'" title="افتح الصفحة">'+
+      x.snippets.slice(0,1).map(s=>'<p class="sn">'+snipHTML(s)+'</p>').join('')+
+      '<div class="rcite">'+citeHTML(x.cite,x.unclear)+' · '+esc(x.layer)+'</div>'+
+      (x.unclear?noTitle(x.book_id):'')+
+      (x.method=='ocr'?'<span class="tag ocr">قراءةٌ آليّة</span>':'')+
+      (x.via_ayat?'<span class="tag" title="لم يُقرأ لفظها سليمًا في الكتاب، وعُرفت بمطابقة الآية: '+esc(x.via_ayat.join('، '))+'">بمطابقة الآية</span>':'')+'</div>';
   });
-  if(S.results.length<S.total)h+='<div style="text-align:center"><button class="btn" id="more">المزيد ('+AR(S.total-S.results.length)+' باقية)</button></div>';
+  if(S.results.length<S.total)h+='<button class="btn3 rmore" id="more">المزيد ('+AR(S.total-S.results.length)+' باقية)</button>';
   res.innerHTML=h;
-  res.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{const x=S.results[+b.dataset.open];openPage(x.book_id,x.n,x.method=='ocr')});
-  res.querySelectorAll('[data-copy]').forEach(b=>b.onclick=()=>{const x=S.results[+b.dataset.copy];
-    copy('«'+plain(x.snippets[0])+'» — '+citeFull(x)+(x.method=='ocr'?' (قراءةٌ آليّة لم تُقابَل بالصورة)':''))});
-  res.querySelectorAll('[data-dadd]').forEach(b=>b.onclick=()=>{const x=S.results[+b.dataset.dadd];
-    addToDraft({kind:'quote',text:plain(x.snippets[0]).replace(/\s+/g,' ').trim(),b:x.book_id,n:x.n,cite:x.cite,vol:x.vol,printed:x.printed,unit:x.unit,layer:x.layer,method:x.method})});
+  res.querySelectorAll('[data-open]').forEach(b=>b.onclick=e=>{if(e.target.closest('[data-ren]'))return;const x=S.results[+b.dataset.open];openPage(x.book_id,x.n,true)});
   if($('#more'))$('#more').onclick=()=>{S.offset=S.results.length;run(false)};
 }
+function markCur(){document.querySelectorAll('#results .rc').forEach(c=>{const x=S.results[+c.dataset.open];c.classList.toggle('cur',!!x&&x.book_id==PV.b&&x.n==PV.n)})}
 let COV=null;
 function setCov(c){COV=c;$('#cov').textContent='قُرئ '+AR(c.done)+' من '+AR(c.books)+' كتابًا · '+AR(c.pages)+' صفحة'+(c.pending||c.reading?' · '+AR(c.pending+c.reading)+' لم تكتمل':'')}
 function covNote(){return COV&&(COV.pending||COV.reading)?' — والبحثُ فيما قُرئ: '+AR(COV.done)+' كتابًا من '+AR(COV.books)+'، وما لم يُقرأ لم يُبحث فيه':''}
 
 // ── عارضُ الصفحة
 const PV={b:0,n:0,data:null};
-async function openPage(b,n,img){
-  PV.b=b;PV.n=n;$('#pv').style.display='block';$('#pvbody').textContent='…';$('#pvfoot').textContent='';$('#pvhead').textContent='';$('#pvnote').textContent='';
-  $('#pvimgw').style.display='none';$('#pvtwo').classList.add('one');
+// عددٌ ومعدودُه: ١ كلمةٌ واحدة · ٢ كلمتان · ٣–١٠ كلمات · ١١ فأكثر كلمةً
+function cnt(n,one,two,few,many){return n==1?one+' واحدة':n==2?two:AR(n)+' '+(n%100>=3&&n%100<=10?few:many)}
+let imgFold=(()=>{try{return localStorage.getItem('bughya-imgfold')=='1'}catch(e){return false}})();
+async function openPage(b,n,img,auto){
+  const rd=READ;if(!$('#p-search').classList.contains('on'))show('search');READ=rd;setRead();
+  $('#pv').classList.remove('start');
+  PV.b=b;PV.n=n;PV.data=null;CARD=null;$('#wcard').style.display='none';markCur();if(!auto)setTab('txt');
+  $('#pvempty').style.display='none';$('#pvwrap').style.display='';
+  $('#pvbody').textContent='…';$('#pvfoot').textContent='';$('#pvhead').textContent='';$('#pvnote').textContent='';$('#pvweak').innerHTML='';$('#pvayat').innerHTML='';
+  $('#pvimgw').innerHTML='';
   const r=await api('/api/page',{b,n});
-  if(r.error||!r.length){$('#pvbody').innerHTML='<span class="err">'+esc(r.error||'لا صفحة بهذا الرقم.')+'</span>';PV.data=null;return}
+  if(PV.b!=b||PV.n!=n)return;
+  if(r.error||!r.length){$('#pvbody').innerHTML='<span class="err">'+esc(r.error||'لا صفحة بهذا الرقم.')+'</span>';PV.data=null;pvGrid();return}
   const p=r[0];PV.data=p;
   $('#pvcite').innerHTML=citeHTML(p.cite)+' <span class="nw">· رقم الكتاب '+AR(p.book_id)+'</span>';
-  const m=$('#pvmeth');m.textContent=p.method=='ocr'?'قراءةٌ آليّة':'نصُّ الملفّ';m.className='tag'+(p.method=='ocr'?' ocr':'');
+  const m=$('#pvmeth');m.innerHTML=p.method=='ocr'?'<svg class="i"><use href="#i-scan"/></svg> قراءةٌ آليّة':'<svg class="i"><use href="#i-doc"/></svg> نصُّ الملفّ';m.className='tag'+(p.method=='ocr'?' ocr':'');
   $('#pvgo').value=p.n;
-  if(!BOOKS||BOOKS.error)try{BOOKS=await api('/api/books')}catch(e){}
-  const bk=Array.isArray(BOOKS)&&BOOKS.find(x=>x.id==p.book_id);PV.total=bk?bk.pages:0;
-  $('#pvtot').textContent=PV.total?'من '+AR(PV.total):'';
-  $('#pvgo').max=PV.total||'';
   $('#pvhead').textContent=p.head||'';
   $('#pvbody').innerHTML=hl(flowText(p.body||'—'));
   $('#pvfoot').innerHTML=p.foot?'<b>الحاشية:</b>\n'+hl(flowText(p.foot)):'';
   $('#pvnote').textContent=p.method=='ocr'?'قُرئت هذه الصفحة قراءةً آليّة، وفيها أخطاء؛ فالصورةُ تحسم قبل أيّ نقل.':'';
+  $('#pvcover').disabled=p.unit!='صفحة';
+  pvGrid();pvActs();
+  if(p.unit=='صفحة'&&!imgFold)showImg();          // النصُّ يظهر أوّلًا، والصورةُ تأتي حين تُجهَّز
   if(!BOOKS||BOOKS.error)try{BOOKS=await api('/api/books')}catch(e){}
-  const bb=Array.isArray(BOOKS)&&BOOKS.find(x=>x.id==p.book_id);
-  if(bb&&OLD.includes(bb.btype)&&p.method=='ocr')$('#pvnote').innerHTML='<div class="oldnote">هذا الكتاب '+BT[bb.btype]+'، والقراءة الآلية فيه ضعيفة جدًّا: اعتمد على صورة الصفحة، ولا تنقل من النص المستخرج.</div>';
+  if(PV.b!=b||PV.n!=n)return;
+  const bk=Array.isArray(BOOKS)&&BOOKS.find(x=>x.id==p.book_id);PV.total=bk?bk.pages:0;
+  $('#pvtot').textContent=PV.total?'من '+AR(PV.total):'';
+  $('#pvgo').max=PV.total||'';
+  if(bk&&OLD.includes(bk.btype)&&p.method=='ocr')$('#pvnote').innerHTML='<div class="oldnote">هذا الكتاب '+BT[bk.btype]+'، والقراءة الآلية فيه ضعيفة جدًّا: اعتمد على صورة الصفحة، ولا تنقل من النص المستخرج.</div>';
   drawCatch(p);
-  if(p.method=='ocr')drawWords(p);
-  $('#pvimg').disabled=p.unit!='صفحة';$('#pvcover').disabled=p.unit!='صفحة';
-  await loadPvToc(p);pvGrid();
-  if(img)showImg();
+  drawWords(p);       // المقروءةُ آليًّا، وصفحاتُ ملفّات وورد المصلَحة (يعيد لها الخادمُ كلماتِها بلا مواضع)
+  loadPvToc(p);
   drawAyat(p);
 }
+// تصفّحُ الكتاب وحده (من كتبي أو المسودة أو المدقّق): بلا شريط بحثٍ ولا نتائج، وفي الرأس «رجوع» و«ابحث في هذا الكتاب».
+// والبحثُ وحده: النتائجُ وبجانبها الصفحة. READ = الشاشةُ التي فُتح منها الكتاب، وnull في البحث
+let READ=null;
+const READ_NAME={books:'كتبي',draft:'المسودة',audit:'المدقّق',welcome:'كتبي',status:'كتبي'};
+function readBook(b,n,from){READ=from||'books';openPage(b,n,true)}
+function setRead(){const on=!!READ;$('#p-search').classList.toggle('read',on);
+  document.querySelectorAll('header nav button').forEach(x=>x.classList.toggle('on',x.dataset.p==(on?(NAVOF[READ]||READ):'search')));
+  $('#pvback').style.display=on?'':'none';$('#pvsearch2').style.display=on?'':'none';
+  if(on)$('#pvback span').textContent='رجوع إلى '+(READ_NAME[READ]||'كتبي')}
+// الأعمدة: بلا صفحةٍ مفتوحة لا عمودَ للصورة؛ وما لا صفحاتِ له (وورد ونصوص) أو طواه المستخدم: شريطٌ ضيّقٌ يُفتح منه
 function pvGrid(){
-  const toc=PV.toc&&PV.toc.length,img=$('#pvimgw').style.display!='none';
-  $('#pvtoc').style.display=toc?'block':'none';
-  $('#pvtwo').style.setProperty('--cols',(toc?'170px ':'')+(img?'minmax(0,1fr) minmax(0,1fr)':'minmax(0,46em)'));
+  const g=$('#pv'),p=PV.data,has=!!(p&&p.unit=='صفحة');
+  g.classList.toggle('nopage',!p||!has);g.classList.toggle('noimg',has&&imgFold);
+  $('#imgfold').innerHTML='<svg class="i"><use href="#i-'+(imgFold?'unfold':'fold')+'"/></svg>';
+  $('#imgfold').title=imgFold?'أظهر صورة الصفحة':'اطوِ الصورة فيتّسع النصّ';
+  $('#rtabs [data-tab=img]').style.display=has?'':'none';
 }
+$('#imgfold').onclick=()=>{imgFold=!imgFold;try{localStorage.setItem('bughya-imgfold',imgFold?'1':'0')}catch(e){}
+  pvGrid();if(!imgFold&&PV.data&&!$('#pvimgw img'))showImg()};
+let IZ=1;
+const setIZ=v=>{IZ=Math.min(3,Math.max(1,Math.round(v*4)/4));$('#pvimgw').style.setProperty('--iz',IZ)};
+$('#zimgin').onclick=()=>setIZ(IZ+0.25);$('#zimgout').onclick=()=>setIZ(IZ-0.25);
+// شاشةُ الجوّال: النتائج أو النصّ أو الصورة
+function setTab(t){$('#pv').dataset.tab=t;document.querySelectorAll('#rtabs button').forEach(b=>b.classList.toggle('on',b.dataset.tab==t));
+  if(t=='img'&&PV.data&&!$('#pvimgw img'))showImg()}
+document.querySelectorAll('#rtabs button').forEach(b=>b.onclick=()=>setTab(b.dataset.tab));
+// صفُّ «أضف إلى المسودة · انسخ بالعزو»: المحدَّدُ من نصّ الصفحة إن وُجد، وإلّا الصفحةُ كلُّها
+function pvSel(){const s=getSelection();if(!PV.data||!s.rangeCount||s.isCollapsed)return '';
+  const a=s.anchorNode;return ($('#pvbody').contains(a)||$('#pvfoot').contains(a))?String(s).replace(/\s+/g,' ').trim():''}
+function pvActs(){const sel=!!pvSel();
+  $('#pvadd').textContent=sel?'+ أضف المحدَّد إلى المسودة':'+ أضف الصفحة إلى المسودة';
+  $('#pvcopy span').textContent=sel?'انسخ المحدَّد بالعزو':'انسخ الصفحة بالعزو'}
+document.addEventListener('selectionchange',()=>{if(PV.data)pvActs()});
 async function loadPvToc(p){
   if(PV.tocb!=p.book_id){PV.tocb=p.book_id;const r=await api('/api/toc',{b:p.book_id});PV.toc=Array.isArray(r)?r:[];
-    $('#pvtoc').innerHTML='<h3>الفهرس</h3>'+PV.toc.map(t=>'<div data-tn="'+t.n+'" style="padding-inline-start:'+(6+(Math.max(1,t.level||1)-1)*10)+'px">'+esc(t.title)+'</div>').join('');
-    $('#pvtoc').querySelectorAll('[data-tn]').forEach(d=>d.onclick=()=>openPage(PV.b,+d.dataset.tn,$('#pvimgw').style.display=='block'))}
+    $('#pvtoc').innerHTML=PV.toc.map(t=>'<div data-tn="'+t.n+'" style="padding-inline-start:'+(6+(Math.max(1,t.level||1)-1)*10)+'px">'+esc(t.title)+'</div>').join('');
+    $('#pvtoc').querySelectorAll('[data-tn]').forEach(d=>d.onclick=()=>{$('#pvtocw').classList.remove('on');openPage(PV.b,+d.dataset.tn,true)})}
+  $('#pvtocw').style.display=PV.toc&&PV.toc.length?'':'none';
   let cur=null;$('#pvtoc').querySelectorAll('[data-tn]').forEach(d=>{d.classList.remove('cur');if(+d.dataset.tn<=p.n)cur=d});
-  if(cur){cur.classList.add('cur');cur.scrollIntoView({block:'nearest'})}
+  if(cur)cur.classList.add('cur');
 }
+$('#pvtocb').addEventListener('click',()=>{const c=$('#pvtoc .cur');if(c)setTimeout(()=>c.scrollIntoView({block:'nearest'}),0)});
 let PVW=null;
-async function drawWords(p){
-  PVW=null;const r=await api('/api/words',{b:p.book_id,n:p.n});
+async function drawWords(p,keep){
+  const r=await api('/api/words',{b:p.book_id,n:p.n});
   if(PV.n!=p.n||PV.b!=p.book_id)return;
-  if(!r.words){if(r.old){const n=document.createElement('div');n.className='note';n.textContent='قُرئ هذا الكتاب بإصدارٍ أقدم من «بُغية»، فلا تظهر فيه مواضعُ الكلمات في الصورة ولا تعليمُ المشكوك فيها. أعد قراءتَه لتظهر.';const bt=document.createElement('button');bt.className='btn2';bt.textContent='أعد قراءة هذا الكتاب';bt.onclick=async()=>{const x=await api('/api/reread-book',null,{b:p.book_id});toast(x.error||'بدأت إعادةُ القراءة');pollProgress()};n.appendChild(document.createTextNode(' '));n.appendChild(bt);$('#pvnote').appendChild(n);}return;}
-  PVW=r;let doubts=0;const SRC=r.text?'خطأً في بناء نصّ الملفّ':'خطأً في القراءة الآلية';
-  const render=lines=>{const sp=lineSeps(lines.map(l=>l.map(w=>w.t).join(' ')));
-    return lines.map((l,i)=>l.map(w=>{if(w.d)doubts++;
-    return '<span class="wd'+(w.d?' dq" title="'+(w.c?'في قاموس كتبك، لكنّها لم ترد فيها بجوار ما حولها، وورد مكانَها ما يخالفها في النقط؛ فقد تكون '+SRC+': قابلها بالصورة':'ليست في قاموس كتبك، فقد تكون '+SRC+': قابلها بالصورة'):'')+'"'+(w.b?' data-b="'+w.b.join(',')+'"':'')+'>'+esc(w.t)+'</span>'}).join(' ')+(i<lines.length-1?sp[i]:'')).join('')};
-  $('#pvbody').innerHTML=render(r.body||[]);
-  if(r.foot&&r.foot.length&&p.foot)$('#pvfoot').innerHTML='<b>الحاشية:</b>\n'+render(r.foot);
-  document.querySelectorAll('#pv .wd[data-b]').forEach(s=>s.onclick=()=>showWord(s));
-  const n=document.createElement('div');n.className='note';
-  n.textContent=r.text?(!r.lexicon?'':doubts?('نصُّ هذا الملفّ أُعيد بناؤه من خطّه، وقد يخطئ البناء. و'+AR(doubts)+' كلمةً تحتها خطٌّ متموّجٌ برتقاليّ: ليست في قاموس كتبك، أو هي فيه لكنّها غريبةٌ بين جارتيها؛ فقابلها بصورة الصفحة قبل نقلها. وما لا خطَّ تحته قد يكون خاطئًا أيضًا.')
+  if(!keep)PVW=null;
+  const old=$('#pvwnote');if(old)old.remove();
+  if(!r.words){if(r.old){const n=document.createElement('div');n.className='note';n.id='pvwnote';n.textContent='قُرئ هذا الكتاب بإصدارٍ أقدم من «بُغية»، فلا تظهر فيه مواضعُ الكلمات في الصورة ولا تعليمُ المشكوك فيها. أعد قراءتَه لتظهر.';const bt=document.createElement('button');bt.className='btn2';bt.textContent='أعد قراءة هذا الكتاب';bt.onclick=async()=>{const x=await api('/api/reread-book',null,{b:p.book_id});toast(x.error||'بدأت إعادةُ القراءة');pollProgress()};n.appendChild(document.createTextNode(' '));n.appendChild(bt);$('#pvnote').appendChild(n);}return;}
+  PVW=r;let doubts=0,fixed=0,oked=0;const SRC=r.text?'خطأً في بناء نصّ الملفّ':'خطأً في القراءة الآلية';
+  const render=(lines,lay)=>{const sp=lineSeps(lines.map(l=>l.map(w=>w.x||w.t).join(' ')));
+    return lines.map((l,i)=>l.map(w=>{if(w.d){doubts++;if(w.x)fixed++;else if(w.ok)oked++}
+    const cls=w.x?' fx':w.ok?' okw':w.d?' dq':'';
+    const tip=w.x?'صحّحتَها من الصورة · قُرئت: «'+w.t+'»':w.ok?'أقررتَها صحيحةً كما قُرئت':w.d?(w.c?'في قاموس كتبك، لكنّها لم ترد فيها بجوار ما حولها، وورد مكانَها ما يخالفها في النقط؛ فقد تكون '+SRC+': قابلها بالصورة':'ليست في قاموس كتبك، فقد تكون '+SRC+': قابلها بالصورة'):'';
+    return '<span class="wd'+cls+'" data-l="'+lay+'" data-i="'+w.i+'"'+(tip?' title="'+esc(tip)+'"':'')+(w.b?' data-b="'+w.b.join(',')+'"':'')+'>'+esc(w.x||w.t)+'</span>'}).join(' ')+(i<lines.length-1?sp[i]:'')).join('')};
+  $('#pvbody').innerHTML=render(r.body||[],'body');
+  if(r.foot&&r.foot.length&&p.foot)$('#pvfoot').innerHTML='<b>الحاشية:</b>\n'+render(r.foot,'foot');
+  document.querySelectorAll('#pv .wd').forEach(s=>s.onclick=e=>{if(!String(getSelection()).trim())openCard(s)});
+  const n=document.createElement('div');n.className='note';n.id='pvwnote';
+  n.textContent=(r.text?(!r.lexicon?'':doubts?('نصُّ هذا الملفّ أُعيد بناؤه من خطّه، وقد يخطئ البناء. و'+AR(doubts)+' كلمةً تحتها خطٌّ متموّجٌ برتقاليّ: ليست في قاموس كتبك، أو هي فيه لكنّها غريبةٌ بين جارتيها؛ فقابلها بصورة الصفحة قبل نقلها. وما لا خطَّ تحته قد يكون خاطئًا أيضًا.')
     :'نصُّ هذا الملفّ أُعيد بناؤه من خطّه، ولم تُعلَّم كلمةٌ في هذه الصفحة؛ وهذا لا يعني أنّها كلَّها صواب.')
     :!r.lexicon?'اضغط أي كلمة لترى موضعها في الصورة. (تعليم الكلمات المشكوك فيها يحتاج كتبًا نصيّة أكثر في مكتبتك.)'
     :doubts?('اضغط أي كلمة لترى موضعها في الصورة. و'+AR(doubts)+' كلمةً تحتها خطٌّ متموّجٌ برتقاليّ، وتُؤطَّر في الصورة: ليست في قاموس كتبك، أو هي فيه لكنّها غريبةٌ بين جارتيها؛ فقد تكون خطأً في القراءة الآلية، فقابلها بالصورة قبل نقلها. وما لا خطَّ تحته قد يكون خاطئًا أيضًا.')
-    :'اضغط أي كلمة لترى موضعها في الصورة. ولم تُعلَّم كلمةٌ في هذه الصفحة: كلُّها في قاموس كتبك وليس فيها ما يُستغرب موضعُه، وهذا لا يعني أنّها كلَّها صواب.';
+    :'اضغط أي كلمة لترى موضعها في الصورة. ولم تُعلَّم كلمةٌ في هذه الصفحة: كلُّها في قاموس كتبك وليس فيها ما يُستغرب موضعُه، وهذا لا يعني أنّها كلَّها صواب.')+
+    ' واضغط كلمةً لتصحّحها من الصورة: يُحفظ تصحيحُك منفصلًا ويبقى نصُّ الكتاب كما قُرئ.'+
+    (r.stale?' ('+AR(r.stale)+' من تصحيحاتك السابقة في هذه الصفحة لم يُطبَّق: تغيّر نصُّها بعد إعادة قراءتها.)':'');
   $('#pvnote').appendChild(n);
-  drawImgBoxes();
+  drawWeak(r,doubts,fixed,oked);
+  drawImgBoxes((document.querySelector('#pv .wd.on')||{}).dataset?.b);
+}
+// «قراءة هذه الصفحة ضعيفة»: إذا بلغ المعلَّمُ WEAK_SHARE من كلمات الصفحة، وWEAK_MIN كلماتٍ على الأقلّ (الحدُّ في أوّل wajiha.py)
+const WEAK_SHARE=__WEAK_SHARE__,WEAK_MIN=__WEAK_MIN__;
+function drawWeak(r,doubts,fixed,oked){
+  const all=[...(r.body||[]),...(r.foot||[])].flat().filter(w=>/[ء-ي]/.test(w.t)).length;
+  const w=$('#pvweak');w.innerHTML='';
+  if(!all||doubts<WEAK_MIN||doubts/all<WEAK_SHARE)return;
+  const done=(fixed?'، صحّحتَ منها '+(fixed==1?'واحدة':cnt(fixed,'','اثنتين','','')):'')+(oked?(fixed?' وأقررتَ ':'، أقررتَ منها ')+(oked==1?'واحدة':cnt(oked,'','اثنتين','',''))+' كما هي':'');
+  w.innerHTML='<div class="weak"><svg class="i"><use href="#i-warn"/></svg><span>'+(r.text?'نصُّ هذه الصفحة معيب':'قراءةُ هذه الصفحة ضعيفة')+': '+
+    cnt(doubts,'كلمةٌ','كلمتان','كلماتٍ','كلمةً')+' مشكوكٌ فيها من '+AR(all)+done+'. اعتمد على الصورة قبل النقل.</span>'+
+    '<button type="button" class="btn3" id="wnext">الكلمة التالية ←</button></div>';
+  // الكلمةُ المشكوكُ فيها التالية لم يُحكم عليها، بعد المفتوحة الآن
+  $('#wnext').onclick=()=>{const ws=[...document.querySelectorAll('#pv .wd.dq')];if(!ws.length){toast('حكمتَ على كلّ المشكوك فيه في هذه الصفحة');return}
+    const cur=$('#pv .wd.on'),all=[...document.querySelectorAll('#pv .wd')],at=cur?all.indexOf(cur):-1;
+    const s=ws.find(x=>all.indexOf(x)>at)||ws[0];s.scrollIntoView({block:'center',behavior:'smooth'});openCard(s)};
 }
 async function showWord(s){
   document.querySelectorAll('#pv .wd.on').forEach(x=>x.classList.remove('on'));s.classList.add('on');
-  if($('#pvimgw').style.display!='block'||!$('#pvimgw img'))await showImg();
+  if(!imgFold&&PV.data&&PV.data.unit=='صفحة'&&!$('#pvimgw img'))await showImg();
   drawImgBoxes(s.dataset.b);
 }
+// ── بطاقةُ الكلمة: تظهر بضغط كلمة، وتُخفى بضغط مكانٍ فارغ أو زرّ الإغلاق. التصحيحُ يُحفظ منفصلًا (tashih)، ونصُّ الكتاب لا يُمسّ
+function wordOf(s){const L=PVW&&PVW[s.dataset.l];if(!L)return null;for(const l of L)for(const w of l)if(w.i==+s.dataset.i)return w;return null}
+let CARD=null;
+function closeCard(){$('#wcard').style.display='none';$('#wcard').innerHTML='';CARD=null;document.querySelectorAll('#pv .wd.on').forEach(x=>x.classList.remove('on'));drawImgBoxes()}
+async function openCard(s){
+  const w=wordOf(s);if(!w||!PV.data)return;CARD={s,w,l:s.dataset.l};
+  showWord(s);
+  const c=$('#wcard'),ocr=PV.data.method=='ocr',SRC=PVW.text?'خطأً في بناء نصّ الملفّ':'خطأً في القراءة الآليّة';
+  let why='',sug='';
+  if(w.x)why='صحّحتَها من الصورة؛ وقُرئت «'+esc(w.t)+'».';
+  else if(w.ok)why='أقررتَها صحيحةً كما قُرئت.';
+  else if(w.d&&w.c)why='في قاموس كتبك، لكنّها غريبةٌ '+(w.with?(w.side=='قبل'?'بعد':'قبل')+' «'+esc(w.with)+'»':'بين جارتيها')+'؛ فقد تكون '+SRC+'.';
+  else if(w.d)why='ليست في قاموس كتبك؛ فقد تكون '+SRC+'.';
+  if(w.a&&!w.x&&!w.ok)sug='<div class="wrow"><span class="muted">اقتراحُ القاموس:</span><button type="button" class="wsug" id="wsug">'+esc(w.a)+'</button>'+
+    (w.with?'<span class="muted">ورد «'+esc(w.side=='قبل'?w.with+' '+w.a:w.a+' '+w.with)+'» في كتبك</span>':'')+'</div>';
+  const marked=w.d&&!w.x&&!w.ok;
+  c.innerHTML='<div class="wtop"><b>«'+esc(w.x||w.t)+'»</b><span class="wwhy">'+why+'</span><button type="button" class="ibtn" id="wclose" title="أغلق" aria-label="أغلق">✕</button></div>'+
+    (w.b?'<div class="wrow"><span class="muted">في الصورة:</span><span class="wclip" id="wclip"><span class="muted">…</span></span></div>':
+      (PVW.text?'<div class="wrow muted">لا موضعَ لهذه الكلمة في الصورة (نصُّ الملفّ لا يحفظ مواضعَ كلماته): قابِلها بصورة الصفحة بعينك.</div>':''))+
+    sug+
+    '<div class="wrow wfix"><input type="text" id="wfin" dir="rtl" placeholder="'+(w.a&&!w.x&&!w.ok?'أو اكتب الصحيح كما في الصورة…':'اكتب الصحيح كما في الصورة…')+'" value="'+esc(w.x||'')+'">'+
+    '<button type="button" class="btn" id="wsave">اعتمد</button>'+
+    (marked?'<button type="button" class="btn3" id="wok">هي صحيحة</button>':'')+
+    (w.x||w.ok?'<button type="button" class="btn3" id="wundo">ألغِ '+(w.x?'التصحيح':'الإقرار')+'</button>':'')+'</div>'+
+    '<div class="wfoot">الاقتراحُ لا يُطبَّق وحده: قابِله بالصورة ثمّ اعتمده. ونصُّ الكتاب كما قُرئ يبقى محفوظًا، وتصحيحُك يُعلَّم بأنّه منك.</div>';
+  c.style.display='block';
+  $('#wclose').onclick=closeCard;
+  if($('#wsug'))$('#wsug').onclick=()=>{$('#wfin').value=w.a;$('#wfin').focus()};
+  $('#wfin').onkeydown=e=>{e.stopPropagation();if(e.key=='Enter'){e.preventDefault();$('#wsave').click()}else if(e.key=='Escape')closeCard()};
+  $('#wsave').onclick=()=>{const v=$('#wfin').value.trim();if(!v){toast('اكتب الكلمةَ كما في الصورة');$('#wfin').focus();return}fixWord({kind:'fix',fixed:v})};
+  if($('#wok'))$('#wok').onclick=()=>fixWord({kind:'ok'});
+  if($('#wundo'))$('#wundo').onclick=()=>fixWord({undo:1});
+  c.scrollIntoView({block:'nearest',behavior:'smooth'});
+  if(w.b)drawClip(w.b,CARD);
+}
+// قصاصةُ الكلمة من صورة الصفحة بموضعها المحفوظ (ws في boxes)، تُقصّ في الصفحة نفسها بلا طلبٍ جديد إن كانت الصورة ظاهرة
+async function drawClip(box,card){
+  let src=($('#pvimgw img')||{}).src;
+  if(!src){const r=await api('/api/image',{b:PV.b,n:PV.n,mark:''});if(r.error||CARD!==card)return;src=r.url}
+  const im=new Image();im.src=src;await new Promise(res=>{im.onload=res;im.onerror=res});
+  if(CARD!==card||!im.naturalWidth)return;
+  const [x,y,bw,bh]=box,W=im.naturalWidth,H=im.naturalHeight,pad=bh*H*0.35;
+  const sx=Math.max(0,x*W-pad*2),sy=Math.max(0,y*H-pad),sw=Math.min(W-sx,bw*W+pad*4),sh=Math.min(H-sy,bh*H+pad*2);
+  const h=54,cv=document.createElement('canvas');cv.height=h*2;cv.width=Math.max(2,Math.round(sw/sh*h*2));
+  cv.getContext('2d').drawImage(im,sx,sy,sw,sh,0,0,cv.width,cv.height);
+  cv.style.height=h+'px';cv.style.width=Math.round(cv.width/2)+'px';cv.title='الكلمةُ في صورة الصفحة';
+  const el=$('#wclip');if(el){el.innerHTML='';el.appendChild(cv)}
+}
+async function fixWord(o){
+  const C=CARD;if(!C)return;const w=C.w;
+  const r=await api('/api/fix',null,Object.assign({b:PV.b,n:PV.n,layer:C.l,i:w.i0!=null?w.i0:w.i,orig:w.t},o));
+  if(r.error){toast(r.error);return}
+  toast(o.undo?'أُلغي':r.kind=='ok'?'أُقرّت كما قُرئت':'حُفظ تصحيحُك');
+  const at=+C.s.dataset.i,lay=C.l;closeCard();
+  await drawWords(PV.data,true);
+  const s=document.querySelector('#pv .wd[data-l="'+lay+'"][data-i="'+at+'"]');if(s){s.classList.add('on');drawImgBoxes(s.dataset.b)}
+}
+document.addEventListener('click',e=>{if(!CARD||e.target.closest('#wcard,.wd,#wnext,#cmenu,.toast'))return;
+  if(e.target.closest('#pvcol,#imgcol'))closeCard()});
 function drawImgBoxes(cur){
   const wrap=$('#pvimgw .imgwrap');if(!wrap)return;
   wrap.querySelectorAll('.wbox').forEach(x=>x.remove());
@@ -1479,22 +1818,20 @@ function hl(t){
   return h;
 }
 async function showImg(){
-  const w=$('#pvimgw');w.style.display='block';$('#pvtwo').classList.remove('one');pvGrid();w.innerHTML='<div class="wait">الصورةُ تُجهَّز…</div>';
+  const w=$('#pvimgw'),b=PV.b,n=PV.n;w.innerHTML='<div class="wait">الصورةُ تُجهَّز…</div>';
   const mark=S.mode=='phrase'&&S.q?S.q:'';
-  let r=await api('/api/image',{b:PV.b,n:PV.n,mark});
-  if(r.error&&mark)r=await api('/api/image',{b:PV.b,n:PV.n,mark:''});
+  let r=await api('/api/image',{b,n,mark});
+  if(r.error&&mark)r=await api('/api/image',{b,n,mark:''});
+  if(PV.b!=b||PV.n!=n)return;
   w.innerHTML=r.error?'<div class="wait err">'+esc(r.error)+'</div>':'<div class="imgwrap"><img src="'+r.url+'" alt="صورة الصفحة"></div>';
   const im=w.querySelector('img');if(im)await new Promise(res=>{if(im.complete)res();else{im.onload=res;im.onerror=res}});
   drawImgBoxes((document.querySelector('#pv .wd.on')||{}).dataset?.b);
 }
-$('#pvimg').onclick=showImg;
-$('#pvclose').onclick=()=>$('#pv').style.display='none';
-document.addEventListener('keydown',e=>{if(e.key=='Escape')$('#pv').style.display='none'});
-$('#pvprev').onclick=()=>PV.n>1&&openPage(PV.b,PV.n-1,$('#pvimgw').style.display=='block');
-$('#pvnext').onclick=()=>(!PV.total||PV.n<PV.total)&&openPage(PV.b,PV.n+1,$('#pvimgw').style.display=='block');
-const goPage=()=>{const n=parseInt($('#pvgo').value);if(n>=1&&(!PV.total||n<=PV.total))openPage(PV.b,n,$('#pvimgw').style.display=='block');else toast('رقمٌ غير صحيح')};
+$('#pvprev').onclick=()=>PV.n>1&&openPage(PV.b,PV.n-1,true);
+$('#pvnext').onclick=()=>(!PV.total||PV.n<PV.total)&&openPage(PV.b,PV.n+1,true);
+const goPage=()=>{const n=parseInt($('#pvgo').value);if(n>=1&&(!PV.total||n<=PV.total))openPage(PV.b,n,true);else toast('رقمٌ غير صحيح')};
 $('#pvgo').addEventListener('keydown',e=>{if(e.key=='Enter'){e.preventDefault();goPage()}e.stopPropagation()});
-document.addEventListener('keydown',e=>{if($('#pv').style.display!='block'||e.target.tagName=='INPUT')return;
+document.addEventListener('keydown',e=>{if(!PV.data||!$('#p-search').classList.contains('on')||e.target.closest('input,textarea,select,[contenteditable]'))return;
   if(e.key=='ArrowLeft')$('#pvnext').click();else if(e.key=='ArrowRight')$('#pvprev').click()});
 // قائمةُ الزرّ الأيمن (نافذةُ البرنامج لا تُظهر قائمةَ المتصفّح): نسخ، ونسخٌ مع العزو في القارئ، ولصق، وتحديدُ الكلّ
 (function(){
@@ -1507,7 +1844,7 @@ document.addEventListener('keydown',e=>{if($('#pv').style.display!='block'||e.ta
     if(fld&&fld.selectionEnd>fld.selectionStart)sel=fld.value.slice(fld.selectionStart,fld.selectionEnd);
     m.innerHTML='';
     if(sel)item('نسخ',()=>copy(sel));
-    if(sel&&!fld&&$('#pv').style.display=='block'&&$('#pv').contains(getSelection().anchorNode)){item('انسخ مع العزو',()=>$('#pvcopy').click());item('أضف إلى المسودة',()=>$('#pvadd').click())}
+    if(sel&&!fld&&pvSel()){item('انسخ مع العزو',()=>$('#pvcopy').click());item('أضف إلى المسودة',()=>$('#pvadd').click())}
     if(fld&&!fld.readOnly){
       if(sel)item('قصّ',()=>{copy(sel);fld.setRangeText('','select');fld.dispatchEvent(new Event('input'))});
       item('لصق',async()=>{try{const t=await navigator.clipboard.readText();fld.focus();fld.setRangeText(t,fld.selectionStart,fld.selectionEnd,'end');fld.dispatchEvent(new Event('input'))}catch(x){toast('للّصق: اضغط Ctrl+V')}});
@@ -1527,19 +1864,31 @@ document.addEventListener('keydown',e=>{if($('#pv').style.display!='block'||e.ta
     b.textContent=names[v];try{localStorage.setItem('bughya-theme',v)}catch(e){}};
   set(names[t]?t:'auto');b.onclick=()=>set(next[t]);
 })();
+// المحدَّدُ إن وُجد، وإلّا متنُ الصفحة كلُّه (وحاشيتُها نقلٌ مستقلٌّ بتحديدها) — كما يُعرض، أي بتصحيحات المستخدم.
+// ومعه: الكلماتُ المصحَّحة فيه (لتقابله البوّابة بما قُرئ)، وهل حُكم على كلّ مشكوكٍ فيه (فيُعدّ مقابَلًا بالصورة)
+function pvQuote(){const p=PV.data;if(!p)return null;const sel=pvSel(),g=getSelection();
+  const foot=!!sel&&!!p.foot&&$('#pvfoot').contains(g.anchorNode);
+  const words=[...document.querySelectorAll(foot?'#pvfoot .wd':'#pvbody .wd')].filter(s=>!sel||g.containsNode(s,true));
+  const text=sel||($('#pvbody').querySelector('.wd')?$('#pvbody').innerText:String(p.body||'')).replace(/\s+/g,' ').trim();
+  if(!text)return null;
+  const fixes=words.filter(s=>s.classList.contains('fx')).map(s=>{const w=wordOf(s);return w&&{o:w.t,x:w.x}}).filter(Boolean);
+  const left=words.filter(s=>s.classList.contains('dq')).length,done=words.filter(s=>s.classList.contains('fx')||s.classList.contains('okw')).length;
+  return {text,foot,fixes,checked:!!done&&!left}}
+['pvcopy','pvadd'].forEach(id=>$('#'+id).onmousedown=e=>e.preventDefault());   // لا يُفقِد الضغطُ التحديد
 $('#pvcopy').onclick=()=>{
-  const p=PV.data;if(!p)return;const sel=String(getSelection()).trim();
-  if(!sel){toast('حدّد النصَّ المراد نقلُه أوّلًا');return}
-  const foot=p.foot&&$('#pvfoot').contains(getSelection().anchorNode);
-  copy('«'+sel+'» — '+p.cite+' · رقم الكتاب '+AR(p.book_id)+(foot?' · الحاشية':'')+(p.method=='ocr'?' (قراءةٌ آليّة لم تُقابَل بالصورة)':''));
+  const p=PV.data,q=pvQuote();if(!q){toast('لا نصَّ في هذه الصفحة');return}
+  copy('«'+q.text+'» — '+p.cite+' · رقم الكتاب '+AR(p.book_id)+(q.foot?' · الحاشية':'')+
+    (p.method=='ocr'?(q.checked?' (قراءةٌ آليّة، قوبلت كلماتُها المشكوكُ فيها بالصورة'+(q.fixes.length?' وصُحّح منها '+AR(q.fixes.length):'')+')':' (قراءةٌ آليّة لم تُقابَل بالصورة)'):
+     q.fixes.length?' (صُحّح منه '+AR(q.fixes.length)+' من صورة الصفحة)':''));
 };
 $('#pvadd').onclick=()=>{
-  const p=PV.data;if(!p)return;const sel=String(getSelection()).replace(/\s+/g,' ').trim();
-  if(!sel){toast('حدّد النصَّ المراد نقلُه أوّلًا');return}
-  const foot=p.foot&&$('#pvfoot').contains(getSelection().anchorNode);
-  addToDraft({kind:'quote',text:sel,b:p.book_id,n:p.n,cite:p.cite,vol:p.vol,printed:p.printed,unit:p.unit,layer:foot?'حاشية':'متن',method:p.method});
+  const p=PV.data,q=pvQuote();if(!q){toast('لا نصَّ في هذه الصفحة');return}
+  addToDraft({kind:'quote',text:q.text,b:p.book_id,n:p.n,cite:p.cite,vol:p.vol,printed:p.printed,unit:p.unit,layer:q.foot?'حاشية':'متن',method:p.method,
+    fixes:q.fixes.length?q.fixes:undefined,imgok:q.checked||undefined});
 };
-$('#pvsearch').onclick=()=>{$('#pv').style.display='none';show('search');S.books=new Set([PV.b]);$('#q').focus();
+$('#pvback').onclick=()=>show(READ||'books');
+$('#pvsearch2').onclick=()=>$('#pvsearch').click();
+$('#pvsearch').onclick=()=>{if(READ){READ=null;setRead()}S.books=new Set([PV.b]);setTab('res');$('#q').focus();
   if(S.q){S.offset=0;S.results=[];run(false);drawFacet()}else toast('اكتب ما تبحث عنه؛ وسيُحصر في هذا الكتاب')};
 
 // ── المسوّدة: صفحةٌ متّصلة يكتب فيها الباحث، والنقولُ فيها قطعٌ مقفلة بعزوها (تُقابَل بصفحاتها)، وحواشيها تُرقَّم وحدها
@@ -1648,7 +1997,7 @@ function qtOpen(s){
   let v='';
   if(it.kind=='aya')v='<div class="v">آية: ['+esc(it.ref||'')+']</div>';
   else{v='<div class="c">'+citeHTML(it.cite)+' <span class="bid nw">رقم الكتاب '+AR(it.b)+'</span></div><div class="v">'+
-    (it.layer=='حاشية'?'<span class="tag foot">الحاشية</span>':'')+(it.method=='ocr'?'<span class="tag ocr">قراءةٌ آليّة</span>':'')+
+    (it.layer=='حاشية'?'<span class="tag foot">الحاشية</span>':'')+(it.method=='ocr'?'<span class="tag ocr">قراءةٌ آليّة</span>':'')+(it.fixes&&it.fixes.length?'<span class="tag fixt" title="'+esc(it.fixes.map(f=>'«'+f.x+'» قُرئت «'+f.o+'»').join('، '))+'">صحّحتَ فيه '+AR(it.fixes.length)+' من الصورة</span>':'')+
     (it.verdict=='غيرُ مطابق'?'<span class="tag bad">لا يطابق نصَّ الصفحة</span>':it.verdict?'<span class="tag ok">'+esc(it.verdict)+'</span>':'')+
     (it.method=='ocr'&&!it.imgok?'<span class="tag warn">لم يُقابَل بالصورة</span>':'')+'</div>'+
     (it.vnote?'<div class="muted" style="font-size:13px">'+esc(it.vnote)+'</div>':'')+
@@ -1660,7 +2009,7 @@ function qtOpen(s){
   let top=R.bottom/z+6;if(top+h>H-8)top=Math.max(8,R.top/z-h-6);
   b.style.top=top+'px';b.style.left=Math.max(8,Math.min(R.right/z-w,W-w-8))+'px';
   $('#dqx').onclick=qtClose;
-  if($('#dqopen'))$('#dqopen').onclick=()=>{qtClose();openPage(it.b,it.n,it.method=='ocr')};
+  if($('#dqopen'))$('#dqopen').onclick=()=>{qtClose();readBook(it.b,it.n,'draft')};
   if($('#dqedit'))$('#dqedit').onclick=()=>{$('#dqet').value=it.text;$('#dqe').classList.add('on');$('#dqet').focus()};
   if($('#dqimg'))$('#dqimg').onchange=async e=>{it.imgok=e.target.checked;await checkItem(it);dRefresh(it);saveDrafts();qtOpen(ED.querySelector('.qt[data-id="'+it.id+'"]'))};
   $('#dqdel').onclick=()=>{const nx=s.nextSibling;DUNDO={node:s,parent:s.parentNode,next:nx};
@@ -1837,7 +2186,7 @@ function drawBooks(){
   document.querySelectorAll('[data-bt]').forEach(s=>s.onchange=async()=>{const r=await api('/api/btype',null,{b:+s.dataset.bt,t:s.value});
     if(r.error||!r.ok){toast(r.error||'تعذّر الحفظ');return}const bk=BOOKS.find(x=>x.id==+s.dataset.bt);bk.btype=s.value=='auto'?null:s.value;toast('حُفظ نوع الكتاب')});
   document.querySelectorAll('[data-sb]').forEach(a=>a.onclick=()=>{S.books=new Set([+a.dataset.sb]);show('search');$('#q').focus();toast('اكتب ما تبحث عنه؛ وسيُحصر في هذا الكتاب');if(S.q){S.offset=0;S.results=[];run(false)}});
-  document.querySelectorAll('[data-rd]').forEach(a=>a.onclick=()=>{const b=BOOKS.find(x=>x.id==+a.dataset.rd);openPage(b.id,1,b.unit=='صفحة')});
+  document.querySelectorAll('[data-rd]').forEach(a=>a.onclick=()=>{readBook(+a.dataset.rd,1,'books')});
 }
 $('#bf').oninput=()=>BOOKS&&drawBooks();
 
@@ -1854,7 +2203,7 @@ $('#renx').onclick=()=>$('#ren').classList.remove('on');
 $('#ren').onclick=e=>{if(e.target.id=='ren')$('#ren').classList.remove('on')};
 $('#renimg').onclick=async()=>{$('#ren').classList.remove('on');
   if(!Array.isArray(BOOKS))try{BOOKS=await api('/api/books')}catch(e){}
-  const b=Array.isArray(BOOKS)&&BOOKS.find(x=>x.id==RENB);openPage(RENB,1,!b||b.unit=='صفحة');
+  const from=READ||(($('.panel.on')||{}).id||'p-books').slice(2);from=='search'?openPage(RENB,1,true):readBook(RENB,1,from);
   toast('إذا عرفتَ العنوان فاضغط «بيانات الكتاب» في أعلى العارض')};
 $('#rensave').onclick=async()=>{
   const r=await api('/api/book-set',null,{b:RENB,title:$('#rent').value,author:$('#rena').value,death:$('#rend').value});
@@ -1862,7 +2211,7 @@ $('#rensave').onclick=async()=>{
   $('#ren').classList.remove('on');toast('حُفظت بياناتُ الكتاب ✓');
   BOOKS=await api('/api/books');
   if($('#p-books').classList.contains('on'))drawBooks();
-  if($('#pv').style.display=='block'&&PV.b==RENB)openPage(PV.b,PV.n,$('#pvimgw').style.display=='block');
+  if(PV.data&&PV.b==RENB)openPage(PV.b,PV.n,true);
   if(S.q){S.offset=0;S.results=[];run(true)}
 };
 $('#pvren').onclick=()=>openRen(PV.b);
@@ -1875,7 +2224,7 @@ let FLOW=true;try{FLOW=localStorage.getItem('bughya-flow')!='0'}catch(e){}
 function flowLabel(){$('#pvflow').textContent=FLOW?'أسطرُ الصفحة كما في الكتاب':'نصٌّ متّصل'}
 flowLabel();
 $('#pvflow').onclick=()=>{FLOW=!FLOW;try{localStorage.setItem('bughya-flow',FLOW?'1':'0')}catch(e){}flowLabel();
-  if(PV.b)openPage(PV.b,PV.n,$('#pvimgw').style.display=='block')};
+  if(PV.data)openPage(PV.b,PV.n,true)};
 // الفاصلُ بعد كلّ سطر: سطرٌ جديد أو مسافة
 function lineSeps(lines){
   const len=lines.map(l=>l.trim().length),nz=len.filter(n=>n>0).sort((a,b)=>a-b),med=nz.length?nz[nz.length>>1]:0;
@@ -2008,7 +2357,7 @@ function drawAudit(filter){
       '<td>'+esc(it.note&&it.note.text||'')+'</td><td>'+(f.cite?esc(f.cite):(n.near?'<span class="muted">أقربُ ما وُجد: '+esc(String(n.near).slice(0,90))+'</span>':'—'))+'</td>'+
       '<td>'+(bk?'<button class="btn2" data-op="'+bk+','+pg+','+i+'">افتح الصفحة وصورتها</button>':'')+'</td></tr>'}).join('')+'</tbody></table></div>';
   document.querySelectorAll('[data-vf]').forEach(a=>a.onclick=()=>drawAudit(a.dataset.vf));if($('#vall'))$('#vall').onclick=()=>drawAudit();
-  document.querySelectorAll('[data-op]').forEach(b=>b.onclick=()=>{const [bk,pg,i]=b.dataset.op.split(',');S.q=(items[+i].quote||'').slice(0,80);S.mode='phrase';openPage(+bk,+pg,true)});
+  document.querySelectorAll('[data-op]').forEach(b=>b.onclick=()=>{const [bk,pg,i]=b.dataset.op.split(',');S.q=(items[+i].quote||'').slice(0,80);S.mode='phrase';readBook(+bk,+pg,'audit')});
   $('#axl').onclick=async()=>{const x=await api('/api/tadqiq/xlsx',{id:AJOB});if(x.error){toast(x.error);return}toast('حُفظ في التنزيلات: '+x.name)};
 }
 $('#exopen').onclick=async()=>{const b=$('#exbox');if(b.style.display=='block'){b.style.display='none';return}b.style.display='block';EX=await api('/api/exclusions');drawEx()};
@@ -2038,7 +2387,7 @@ $('#uninsy').onclick=async()=>{const r=await api('/api/uninstall',null,{});
   if(r.error){toast(r.error);return}$('#uninsq').textContent='يُفتح مُزيلُ التنصيب، وتُغلق «بُغية» الآن…'};
 ab.onclick=e=>{if(e.target==ab)ab.classList.remove('on')};document.addEventListener('keydown',e=>{if(e.key=='Escape')ab.classList.remove('on')});
 pollProgress();
-</script><script>document.querySelectorAll('header nav button').forEach(b=>{const s=document.getElementById('p-'+b.dataset.p);if(!s||b.dataset.p=='welcome')return;const h=document.createElement('h2');h.className='ptl';h.textContent=b.textContent;(s.querySelector('.wrap')||s.querySelector('.bar')||s).prepend(h)});</script>
+</script><script>Object.entries({books:'كتبي',audit:'مدقّق الإحالات',draft:'المسودة',jiwar:'ألفاظٌ مجاورة',groups:'مجموعات الألفاظ',status:'حال المكتبة'}).forEach(([k,t])=>{const s=document.getElementById('p-'+k);if(!s)return;const h=document.createElement('h2');h.className='ptl';h.textContent=t;(s.querySelector('.wrap')||s).prepend(h)});</script>
 </body></html>"""
 
 
