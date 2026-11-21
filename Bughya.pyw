@@ -3,6 +3,7 @@
 ويُستدعى بوسائط لأدواته الفرعيّة (فيعمل بعد التغليف ملفًّا واحدًا بلا بايثون منفصل):
     Bughya --tool <أداة> ...      تشغيلُ أداةٍ من المحرّك (maktaba · bahth · nass · sura · mustalah · tadqiq)
     Bughya --pick-folder          حوارُ اختيار مجلّد
+    Bughya --pick-save/--pick-open  حوارا حفظ النسخة الاحتياطيّة وفتحها
 """
 import multiprocessing
 import pathlib
@@ -27,9 +28,9 @@ def main() -> int:
         name = sys.argv[2]
         sys.argv = [name + ".py"] + sys.argv[3:]
         return importlib.import_module(name).main() or 0
-    if len(sys.argv) > 1 and sys.argv[1] == "--pick-folder":
+    if len(sys.argv) > 1 and sys.argv[1] in ("--pick-folder", "--pick-save", "--pick-open"):
         import tkinter_dialog
-        tkinter_dialog.ask()
+        tkinter_dialog.ask(sys.argv[1][7:], sys.argv[2] if len(sys.argv) > 2 else "")
         return 0
     import wajiha
     if len(sys.argv) > 1:      # --no-open أو --browser: في المتصفّح (للفحص)

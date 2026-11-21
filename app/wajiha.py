@@ -591,6 +591,114 @@ def api_stop(body: dict) -> dict:
     return {"text": run("maktaba.py", "stop")[0].strip()}
 
 
+# ───────────────────────── النسخةُ الاحتياطيّة ─────────────────────────
+
+BACKUP_JOB = {"state": "idle"}
+
+
+def api_backup_state(q: dict) -> dict:
+    import nuskha
+    st = nuskha.state()
+    st["job"] = BACKUP_JOB.get("state")
+    return st
+
+
+def _drive(p) -> str:
+    return os.path.splitdrive(os.path.abspath(str(p)))[0].upper()
+
+
+def api_backup_make(body: dict) -> dict:
+    import nuskha
+    if BACKUP_JOB.get("state") == "running":
+        return {"error": "تُصنع نسخةٌ الآن، فانتظر حتى تكتمل."}
+    dest = tkinter_dialog.pick_save(nuskha.default_name())
+    if not dest:
+        return {"cancelled": True}
+    if not dest.lower().endswith(".zip"):
+        dest += ".zip"
+    same = common.IS_WIN and _drive(dest) == _drive(common.DATA) and "google" not in dest.lower() \
+        and "onedrive" not in dest.lower()
+    BACKUP_JOB.clear()
+    BACKUP_JOB.update({"state": "running", "done": 0, "total": 1, "path": dest, "same_drive": same})
+
+    def work():
+        try:
+            r = nuskha.make(pathlib.Path(dest), bool(body.get("with_books")),
+                            progress=lambda d, t: BACKUP_JOB.update(done=d, total=t))
+            BACKUP_JOB.update(state="done", result=r)
+        except Exception as e:
+            BACKUP_JOB.update(state="error", error="تعذّر صنعُ النسخة: %s" % e)
+    threading.Thread(target=work, daemon=True).start()
+    return {"ok": True, "path": dest, "same_drive": same}
+
+
+def api_backup_job(q: dict) -> dict:
+    return dict(BACKUP_JOB)
+
+
+def api_backup_snooze(body: dict) -> dict:
+    import nuskha
+    nuskha.snooze()
+    return {"ok": True}
+
+
+def api_backup_pick(body: dict) -> dict:
+    """يختار المستخدمُ ملفَّ النسخة، فيُعرض عليه ما فيه قبل أن يُسترجع."""
+    import nuskha
+    path = tkinter_dialog.pick_open()
+    if not path:
+        return {"cancelled": True}
+    try:
+        man = nuskha.read_manifest(pathlib.Path(path))
+    except ValueError as e:
+        return {"error": str(e)}
+    return {"ok": True, "path": path, "manifest": man}
+
+
+def api_backup_restore(body: dict) -> dict:
+    import maktaba
+    import nuskha
+    path = pathlib.Path(str(body.get("path", "")))
+    if not path.is_file():
+        return {"error": "لم أجد ملفَّ النسخة."}
+    if maktaba.running():                       # القراءةُ الجارية تكتب في المخزن: تُوقف أوّلًا
+        run("maktaba.py", "stop")
+        for _ in range(120):
+            if not maktaba.running():
+                break
+            time.sleep(0.5)
+        else:
+            return {"error": "القراءةُ ما زالت جارية ولم تتوقّف. انتظر قليلًا ثمّ أعد المحاولة."}
+    try:
+        r = nuskha.restore(path)
+    except ValueError as e:
+        return {"error": str(e)}
+    _ocr_cache[1] = None
+    miss = nuskha.missing_sources()
+    out = {"ok": True, "missing_sources": miss, "with_books": r["manifest"].get("with_books"),
+           "created": r["manifest"].get("created")}
+    if not miss:                                # الكتبُ في مواضعها نفسها (الجهاز نفسه): يُفحص ويُستأنف
+        out["relink"] = nuskha.relink("")
+        run("maktaba.py", "update", "--detach")
+    return out
+
+
+def api_backup_relink(body: dict) -> dict:
+    """«أين كتبك الآن؟»: يختار المجلّد، فتُعرف الكتبُ ببصمتها، ثمّ تُستأنف القراءة لما بقي."""
+    import nuskha
+    folder = ""
+    if not body.get("skip"):
+        folder = tkinter_dialog.pick_folder("أين كتبك الآن؟")
+        if not folder:
+            return {"cancelled": True}
+    try:
+        r = nuskha.relink(folder)
+    except ValueError as e:
+        return {"error": str(e)}
+    run("maktaba.py", "update", "--detach")
+    return r
+
+
 def _vnum(v: str) -> tuple:
     return tuple(int(x) for x in re.findall(r"\d+", v or "")[:3]) or (0,)
 
@@ -794,8 +902,15 @@ GET = {
     "/api/groups": api_groups_get,
     "/api/cats": api_cats_get,
     "/api/drafts": api_drafts_get,
+    "/api/backup/state": api_backup_state,
+    "/api/backup/job": api_backup_job,
 }
 POST = {
+    "/api/backup/make": api_backup_make,
+    "/api/backup/snooze": api_backup_snooze,
+    "/api/backup/pick": api_backup_pick,
+    "/api/backup/restore": api_backup_restore,
+    "/api/backup/relink": api_backup_relink,
     "/api/update": api_update,
     "/api/groups": api_groups_set,
     "/api/pick-folder": api_pick_folder,
@@ -1214,6 +1329,11 @@ header .ver{display:flex;flex-direction:column;align-items:center;padding:10px 4
 header .ver button{background:none;border:0;color:#e9e2c8;font:12px var(--ui);cursor:pointer;padding:2px 4px;text-decoration:underline dotted;text-underline-offset:3px}
 #about{display:none;position:fixed;inset:0;background:#0a1a14cc;z-index:6;align-items:center;justify-content:center;padding:16px;grid-column:auto}
 #about.on{display:flex}
+.dlg{display:none;position:fixed;inset:0;background:#0a1a14cc;z-index:8;align-items:center;justify-content:center;padding:16px;grid-column:auto}
+.dlg.on{display:flex}
+.dlg .abox{background:var(--card);border:1px solid var(--gold);border-radius:3px;padding:18px 24px;width:100%;max-width:560px;max-height:88vh;overflow:auto;font-size:15px;line-height:1.8}
+.dlg h3{margin:0 0 8px}.dlg ul,.dlg ol{margin:4px 0 10px;padding-inline-start:22px}.dlg .warn{color:var(--err)}
+#bkbox .bkl{margin:6px 0 10px}#bkprog{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin:8px 0;display:none}#bkprog i{display:block;height:100%;width:0;background:var(--acc)}
 #ren{display:none;position:fixed;inset:0;background:#0a1a14cc;z-index:7;align-items:center;justify-content:center;padding:16px;grid-column:auto}
 #ren.on{display:flex}
 #ren .abox{background:var(--card);border:1px solid var(--gold);border-radius:3px;padding:18px 22px;width:100%;max-width:520px}
@@ -1323,6 +1443,29 @@ header .ver button{background:none;border:0;color:#e9e2c8;font:12px var(--ui);cu
 <div class="asec muted">الأصل: مبنيٌّ على «هديّة وَتَد» من «وَتَد الوقفيّة للمساندة الأكاديميّة والتعليم».<br>خطُّ الاسم: الرقعة (Aref Ruqaa) برخصة SIL OFL.</div>
 <div style="text-align:left;margin-top:8px"><button class="btn" id="abtx">إغلاق</button></div></div></div>
 <div class="banner" id="updbar" style="display:none"></div>
+<div class="banner" id="bkbar" style="display:none">مضى شهرٌ على آخر نسخةٍ احتياطيّة. <button class="btn2" id="bkbarmk">اصنعها الآن</button> <span class="lnk" id="bkbarno">لاحقًا</span></div>
+<div class="dlg" id="bkhelp" role="dialog" aria-modal="true" aria-label="أين أحفظ النسخة؟"><div class="abox">
+<h3>احفظ نسختك في مكانٍ آمن</h3>
+<p><b>النسخة تحفظ:</b> مسوّداتك، وتصحيحاتك، وعناوين كتبك وتصنيفاتها، والنصّ المقروء من كتبك (فلا تحتاج إلى قراءتها من جديد).<br>
+<b>ولا تحفظ:</b> ملفّات الكتب نفسها، إلّا إن اخترت ذلك. فاحفظ مجلّد كتبك أيضًا.</p>
+<p class="warn"><b>لا تحفظ النسخة على القرص C نفسه</b>، فإن تعطّل الجهاز أو هُيِّئ من جديد ضاعت معه.</p>
+<b>أين تحفظها؟</b>
+<ul><li><b>ذاكرةٌ محمولة أو قرصٌ خارجيّ:</b> الأسهل والأسرع.</li>
+<li><b>Google Drive:</b> يلزمه حساب Gmail، ومساحته المجانيّة ١٥ غيغابايت.
+<ul><li>نزّل برنامج «Google Drive للكمبيوتر» من موقع قوقل وادخل بحسابك.</li>
+<li>سيظهر لك قرصٌ جديد اسمه Google Drive، فاختره موضعًا للنسخة، فتُرفع وحدها.</li>
+<li>أو ارفعها يدويًّا: افتح drive.google.com ← «جديد» ← «تحميل ملف».</li></ul></li>
+<li><b>OneDrive:</b> إن كان مفعّلًا في ويندوز عندك، اختر مجلّده بالطريقة نفسها.</li></ul>
+<b>بعد تهيئة الجهاز، أو عند الانتقال إلى جهازٍ آخر:</b>
+<ol><li><b>انسخ كتبك</b> إلى الجهاز الجديد من الذاكرة المحمولة أو من Google Drive، وضعها في أيّ مجلّدٍ تريد.</li>
+<li><b>نصّب «بُغية»</b> على الجهاز الجديد.</li>
+<li>افتحه واضغط <b>«استرجع من نسخة»</b>، ثمّ اختر ملفّ النسخة.</li>
+<li>سيسألك البرنامج: <b>«أين كتبك الآن؟»</b>، فدُلّه على مجلّدها. فيتعرّف على كلّ كتاب ولو تغيّر موضعه أو اسم الجهاز، وتعود إليك مسوّداتك وتصحيحاتك والنصّ المقروء كما كانت، دون قراءة الكتب من جديد.</li></ol>
+<p><b>للانتقال إلى جهازٍ آخر:</b> اصنع نسخةً جديدة قبل الانتقال مباشرة، لتنقل آخر ما عملت.<br>
+<b>ننصحك</b> بنسخةٍ جديدة كلّ شهر، أو بعد كلّ عملٍ كبير في مسوّداتك.</p>
+<p class="muted">البرنامج لا يرفع شيئًا إلى الإنترنت بنفسه، فأنت من يختار مكان الحفظ.</p>
+<div style="text-align:left"><button class="btn" id="bkhelpx">إغلاق</button></div></div></div>
+<div class="dlg" id="bkrest" role="dialog" aria-modal="true" aria-label="استرجاعُ نسخة"><div class="abox"><div id="bkrbody"></div></div></div>
 <div class="banner" id="ocrbar" style="display:none"></div>
 <div class="banner" id="progbar" style="display:none;background:var(--acc2);color:var(--ink);border-color:var(--line)"></div>
 
@@ -1330,6 +1473,7 @@ header .ver button{background:none;border:0;color:#e9e2c8;font:12px var(--ui);cu
 <section class="panel" id="p-welcome"><div class="wrap">
 <div class="box2" id="wlc"><h2 style="margin:0">أهلًا بك في «بُغية»</h2>
 <div class="help" style="font-size:16px">«بُغية» قارئٌ لكتبك على جهازك: تبحث فيها وتنقل منها بعزوٍ كامل، وتتحقّق من إحالات ما تكتبه. لا إنترنتَ ولا حسابَ؛ وكتبُك لا تغادر جهازك.</div></div>
+<div class="box2" style="text-align:center">عندك نسخةٌ احتياطيّة من جهازٍ سابق؟ <span class="lnk" id="wrest">استرجعها</span></div>
 <div id="dz">اسحب كتبَك أو مجلّدَ كتبك إلى هنا<small>بي دي إف (نصّيٌّ أو مصوَّر) · وورد · نصوص · صفحات ويب · كتب إلكترونيّة (epub) · صور</small>
 <div class="acts" style="justify-content:center;margin-top:14px"><button class="btn" id="pickdir">اختر مجلّدًا من جهازك</button><button class="btn2" id="pickfiles">أو اختر ملفّات</button></div>
 <input type="file" id="fileinp" multiple style="display:none"></div>
@@ -1421,7 +1565,7 @@ header .ver button{background:none;border:0;color:#e9e2c8;font:12px var(--ui);cu
 
 <!-- ═════ الكتب ═════ -->
 <section class="panel" id="p-books"><div class="wrap">
-<div class="row" style="margin:-4px 0 16px;align-items:center"><button type="button" class="btn3 gold" data-go="welcome">+ أضف كتبًا</button><button type="button" class="btn3" data-go="status">حال المكتبة</button></div>
+<div class="row" style="margin:-4px 0 16px;align-items:center"><button type="button" class="btn3 gold" data-go="welcome">+ أضف كتبًا</button><button type="button" class="btn3" data-go="status">حال المكتبة</button><button type="button" class="btn3" id="gobk">النسخة الاحتياطيّة</button></div>
 <div class="row" style="margin-bottom:20px;align-items:center"><input type="text" id="bf" placeholder="صفِّ بالعنوان أو المؤلّف" style="flex:1;max-width:420px;padding:5px 12px;border:1px solid var(--line);border-radius:3px;background:var(--card)"><span class="muted" id="bcount"></span></div>
 <div class="chips" id="bchips"></div>
 <div class="shelf" id="btab"></div></div></section>
@@ -1431,7 +1575,13 @@ header .ver button{background:none;border:0;color:#e9e2c8;font:12px var(--ui);cu
 <div class="box2"><pre id="stext">…</pre></div>
 <div class="box2"><button class="btn" id="upd">حدّث المكتبة</button> <button class="btn2" id="stopb">أوقف القراءة</button>
 <div class="help">يقرأ ما جدّ من الكتب في مجلّداتك، ويُكمل ما لم تكتمل قراءتُه، في الخلفيّة. والبحثُ يعمل فيما قُرئ ريثما تكتمل. والكتبُ المصوَّرة تأخذ وقتًا.</div>
-<pre id="utext" class="muted"></pre></div></div></section>
+<pre id="utext" class="muted"></pre></div>
+<div class="box2" id="bkbox"><b>النسخة الاحتياطيّة</b>
+<div class="bkl muted" id="bklast">…</div>
+<button class="btn" id="bkmk">اصنع نسخةً احتياطيّة</button> <button class="btn2" id="bkrs">استرجع من نسخة</button>
+<label id="bkbl" style="display:none;margin-top:8px;font-size:14px"><input type="checkbox" id="bkbooks"> ومعها الكتبُ التي سحبتَها إلى البرنامج (<span id="bkbsz"></span>)</label>
+<div id="bkprog"><i></i></div><div id="bktext" class="help"></div>
+<div class="help"><span class="lnk" id="bkhelpo">أين أحفظها؟</span></div></div></div></section>
 
 <div id="ren" role="dialog" aria-modal="true" aria-label="بيانات الكتاب"><div class="abox">
 <b style="font:700 22px var(--text)">بياناتُ الكتاب</b> <span class="muted" id="renid"></span>
@@ -1468,7 +1618,7 @@ function show(p){
   if(p=='search'&&READ){READ=null;setRead()}
   document.querySelectorAll('header nav button').forEach(x=>x.classList.toggle('on',x.dataset.p==(NAVOF[p]||p)));
   document.querySelectorAll('.panel').forEach(x=>x.classList.toggle('on',x.id=='p-'+p));
-  if(p=='books')loadBooks(); if(p=='status')loadStatus(); if(p=='groups')loadGroups(); if(p=='welcome')loadSources(); if(p=='draft')loadDrafts();
+  if(p=='books')loadBooks(); if(p=='status'){loadStatus();loadBackup()}if(p=='groups')loadGroups(); if(p=='welcome')loadSources(); if(p=='draft')loadDrafts();
 }
 
 // ── البحث
@@ -2387,6 +2537,56 @@ $('#uninsy').onclick=async()=>{const r=await api('/api/uninstall',null,{});
   if(r.error){toast(r.error);return}$('#uninsq').textContent='يُفتح مُزيلُ التنصيب، وتُغلق «بُغية» الآن…'};
 ab.onclick=e=>{if(e.target==ab)ab.classList.remove('on')};document.addEventListener('keydown',e=>{if(e.key=='Escape')ab.classList.remove('on')});
 pollProgress();
+
+// ── النسخةُ الاحتياطيّة
+function MB(n){return AR(Math.max(1,Math.round((n||0)/1048576)))+' ميغابايت'}
+function daysTxt(d){if(d==null)return '';if(d==0)return 'اليوم';if(d==1)return 'أمس';if(d==2)return 'قبل يومين';return 'قبل '+AR(d)+(d%100>=3&&d%100<=10?' أيّام':' يومًا')}
+async function loadBackup(){const r=await api('/api/backup/state');if(!r||r.error)return;
+  $('#bklast').textContent=r.last?'آخر نسخة: '+daysTxt(r.days)+(r.last_path?' — في: '+r.last_path:''):'لم تصنع نسخةً احتياطيّة بعد.';
+  if(r.books_size>0){$('#bkbl').style.display='block';$('#bkbsz').textContent=MB(r.books_size)}
+  $('#bkbar').style.display=r.remind?'block':'none'}
+async function bkMake(){const b=$('#bkmk');b.disabled=true;$('#bktext').textContent='اختر مكان الحفظ في النافذة التي فُتحت…';
+  const r=await api('/api/backup/make',null,{with_books:$('#bkbooks').checked});
+  if(r.cancelled||r.error){b.disabled=false;$('#bktext').innerHTML=r.error?'<span class="err">'+esc(r.error)+'</span>':'';return}
+  $('#bkbar').style.display='none';$('#bkprog').style.display='block';$('#bkprog i').style.width='0';
+  const t=setInterval(async()=>{const j=await api('/api/backup/job');
+    if(j.state=='running'){const p=Math.round(100*j.done/(j.total||1));$('#bkprog i').style.width=p+'%';$('#bktext').textContent='تُصنع النسخة… '+AR(p)+'٪ (قد يستغرق ذلك دقيقة، فلا تغلق البرنامج)';return}
+    clearInterval(t);$('#bkprog').style.display='none';b.disabled=false;
+    if(j.state=='done'){$('#bktext').innerHTML='حُفظت النسخة ('+MB(j.result.size)+') في:<br>'+esc(j.result.path)+
+      (j.same_drive?'<br><span class="err">تنبيه: حفظتَها على القرص نفسه الذي عليه البرنامج، فلا تحميك إن تعطّل الجهاز أو هُيِّئ. انسخها إلى ذاكرةٍ محمولة أو إلى Google Drive.</span>':'');loadBackup()}
+    else $('#bktext').innerHTML='<span class="err">'+esc(j.error||'تعذّر صنعُ النسخة.')+'</span>'},700)}
+$('#bkmk').onclick=bkMake;
+$('#bkbarmk').onclick=()=>{show('status');bkMake()};
+$('#gobk').onclick=()=>{show('status');setTimeout(()=>$('#bkbox').scrollIntoView({behavior:'smooth',block:'center'}),150)};
+$('#bkbarno').onclick=async()=>{$('#bkbar').style.display='none';await api('/api/backup/snooze',null,{})};
+const BH=$('#bkhelp');$('#bkhelpo').onclick=()=>{BH.classList.add('on');$('#bkhelpx').focus({preventScroll:true});BH.querySelector('.abox').scrollTop=0};$('#bkhelpx').onclick=()=>BH.classList.remove('on');
+const BR=$('#bkrest');
+function bkr(h){$('#bkrbody').innerHTML=h;BR.classList.add('on')}
+function bkClose(){return '<div style="text-align:left;margin-top:8px"><button class="btn" id="bkrx">إغلاق</button></div>'}
+function bkErr(e){bkr('<p class="err">'+esc(e)+'</p>'+bkClose());$('#bkrx').onclick=()=>BR.classList.remove('on')}
+async function bkRestore(){const r=await api('/api/backup/pick',null,{});if(r.cancelled)return;if(r.error)return bkErr(r.error);
+  const m=r.manifest||{},s=m.summary||{};
+  bkr('<h3>استرجاعُ نسخة</h3><p>صُنعت هذه النسخة في '+esc(AR(m.created||''))+'. عددُ كتبها: '+AR(s.books||0)+'، ومسوّداتها: '+AR(s.drafts||0)+(m.with_books?'، ومعها الكتبُ المسحوبة إلى البرنامج':'')+'.</p>'+
+    '<p>ستحلّ محلَّ بياناتك الحاليّة في البرنامج. وتُحفظ بياناتُك الحاليّة قبل ذلك في مجلّد «قبل-الاسترجاع» داخل مجلّد بيانات البرنامج. ولا يُمسّ شيءٌ من ملفّات كتبك.</p>'+
+    '<div style="text-align:left"><button class="btn" id="bkry">نعم، استرجعها</button> <button class="btn2" id="bkrn">إلغاء</button></div>');
+  $('#bkrn').onclick=()=>BR.classList.remove('on');
+  $('#bkry').onclick=async()=>{bkr('<p>يُسترجع الآن… لا تغلق البرنامج.</p>');
+    const x=await api('/api/backup/restore',null,{path:r.path});if(x.error)return bkErr(x.error);
+    if(x.missing_sources&&x.missing_sources.length)bkWhere(x.missing_sources);else bkDone(x.relink)}}
+function bkWhere(srcs){
+  bkr('<h3>أين كتبك الآن؟</h3><p>اُسترجعت بياناتُك. وكانت كتبُك في:</p><ul>'+srcs.map(x=>'<li><bdi dir="ltr">'+esc(x)+'</bdi></li>').join('')+'</ul>'+
+    '<p>ولم أجدها في هذا الموضع على هذا الجهاز. فدُلّني على المجلّد الذي نسختَها إليه، فأتعرّف على كلّ كتابٍ ببصمته، ولا يُقرأ من جديد.</p>'+
+    '<div style="text-align:left"><button class="btn" id="bkrl">اختر مجلّد كتبك</button> <button class="btn2" id="bkrk">ليست عندي الآن</button></div>');
+  const go=async skip=>{bkr('<p>أتعرّف على كتبك…</p>');const x=await api('/api/backup/relink',null,{skip});
+    if(x.cancelled)return bkWhere(srcs);if(x.error)return bkErr(x.error);bkDone(x)};
+  $('#bkrl').onclick=()=>go(false);$('#bkrk').onclick=()=>go(true)}
+function bkDone(x){let h='<h3>اكتمل الاسترجاع</h3>';
+  if(x){h+='<p>كتبُك: '+AR(x.total)+'، عرفتُ منها '+AR(x.total-x.missing)+'.</p>';
+    if(x.missing)h+='<p>ولم أجد '+AR(x.missing)+' منها، فتبقى نصوصُها محفوظة، وتعود إليها متى أضفتَ مجلّدها من «أضف كتبًا»:</p><ul>'+
+      x.missing_titles.slice(0,10).map(t=>'<li>'+esc(t)+'</li>').join('')+(x.missing>10?'<li>وغيرُها ('+AR(x.missing-10)+')</li>':'')+'</ul>'}
+  h+='<div style="text-align:left"><button class="btn" id="bkrok">تمّ</button></div>';bkr(h);$('#bkrok').onclick=()=>location.reload()}
+$('#bkrs').onclick=bkRestore;$('#wrest').onclick=bkRestore;
+setTimeout(loadBackup,6000);
 </script><script>Object.entries({books:'كتبي',audit:'مدقّق الإحالات',draft:'المسودة',jiwar:'ألفاظٌ مجاورة',groups:'مجموعات الألفاظ',status:'حال المكتبة'}).forEach(([k,t])=>{const s=document.getElementById('p-'+k);if(!s)return;const h=document.createElement('h2');h.className='ptl';h.textContent=t;(s.querySelector('.wrap')||s).prepend(h)});</script>
 </body></html>"""
 
