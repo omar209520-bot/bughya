@@ -719,8 +719,112 @@ def api_update_check(q: dict) -> dict:
     latest = (rel.get("tag_name") or "").lstrip("vV")
     exe = [a.get("browser_download_url") for a in rel.get("assets") or [] if (a.get("name") or "").lower().endswith(".exe")]
     url = exe[0] if exe else rel.get("html_url")
+    UPD["rel"] = rel
     return {"ok": True, "current": common.VERSION, "latest": latest, "newer": _vnum(latest) > _vnum(common.VERSION),
-            "url": url if (url or "").startswith("https://github.com/") else None}
+            "url": url if (url or "").startswith("https://github.com/") else None,
+            "news": _news(rel.get("body") or ""), "self": bool(common.FROZEN and _setup_asset(rel))}
+
+
+# ─────────── التحديثُ الذاتيّ: تنزيلُ ملفّ التنصيب، ومطابقةُ بصمته، ثمّ تنصيبُه صامتًا وإعادةُ فتح البرنامج ───────────
+
+UPD = {"state": "idle", "rel": None}
+UPD_PREFIX = "https://github.com/omar209520-bot/bughya/releases/download/"
+
+
+def _news(body: str) -> list:
+    """عناوينُ ما جدّ من ملاحظات الإصدار (أقسامُ «###»)، دون قسم التثبيت."""
+    heads = [re.sub(r"[*`#]", "", m).strip() for m in re.findall(r"^###\s*(.+)$", body, re.M)]
+    return [h for h in heads if h and "التثبيت" not in h and "التنصيب" not in h][:5]
+
+
+def _setup_asset(rel: dict):
+    """ملفُّ التنصيب ورابطُه ورابطُ ملفّ البصمات، ولا تُقبل إلّا من صفحة إصدارات «بُغية»."""
+    assets = {(a.get("name") or ""): a.get("browser_download_url") or "" for a in rel.get("assets") or []}
+    setup = [n for n in assets if re.fullmatch(r"Bughya-Setup-[\d.]+\.exe", n)]
+    sums = assets.get("SHA256SUMS.txt", "")
+    if not setup or not assets[setup[0]].startswith(UPD_PREFIX) or not sums.startswith(UPD_PREFIX):
+        return None
+    return setup[0], assets[setup[0]], sums
+
+
+def _fetch(url: str, timeout: int = 30):
+    return urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "Bughya/" + common.VERSION}),
+                                  timeout=timeout)
+
+
+def _download_update(rel: dict) -> None:
+    import hashlib
+    try:
+        name, url, sums_url = _setup_asset(rel)
+        with _fetch(sums_url) as r:
+            sums = r.read().decode("utf-8", "replace")
+        want = next((ln.split()[0].lower() for ln in sums.splitlines()
+                     if len(ln.split()) >= 2 and ln.split()[-1].lstrip("*") == name), None)
+        if not want:
+            raise RuntimeError("لم أجد بصمةَ الملفّ في صفحة الإصدار، فلم أنزّله.")
+        d = common.DATA / "update"
+        d.mkdir(parents=True, exist_ok=True)
+        for old in list(d.glob("*.exe")) + list(d.glob("*.part")):
+            try:
+                old.unlink()
+            except OSError:
+                pass
+        tmp, h, got = d / (name + ".part"), hashlib.sha256(), 0
+        with _fetch(url, timeout=60) as r, tmp.open("wb") as f:
+            UPD.update(total=int(r.headers.get("Content-Length") or 0))
+            while True:
+                chunk = r.read(1 << 16)
+                if not chunk:
+                    break
+                f.write(chunk)
+                h.update(chunk)
+                got += len(chunk)
+                UPD.update(got=got)
+        if h.hexdigest() != want:
+            tmp.unlink()
+            raise RuntimeError("بصمةُ الملفّ المنزَّل لا تطابق بصمتَه في صفحة الإصدار، فلم أنصّبه. أعد المحاولة لاحقًا.")
+        exe = d / name
+        tmp.replace(exe)
+        UPD.update(state="ready", path=str(exe))
+    except Exception as e:
+        UPD.update(state="error", reason=str(e) if isinstance(e, RuntimeError) else "تعذّر التنزيل: %s" % e)
+
+
+def api_selfupdate_start(body: dict) -> dict:
+    """يبدأ تنزيلَ ملفّ التنصيب في الخلفيّة (من آخر إصدارٍ سُئل عنه)."""
+    rel = UPD.get("rel")
+    if not rel or not _setup_asset(rel):
+        return {"error": "تحقّق من وجود التحديث أوّلًا."}
+    if UPD["state"] != "downloading":
+        UPD.update(state="downloading", got=0, total=0, reason="", path="")
+        threading.Thread(target=_download_update, args=(rel,), daemon=True).start()
+    return {"ok": True}
+
+
+def api_selfupdate_job(q: dict) -> dict:
+    return {k: UPD.get(k) for k in ("state", "got", "total", "reason")}
+
+
+def api_selfupdate_install(body: dict) -> dict:
+    """يوقف القراءةَ الجارية بعد صفحتها، ثمّ يشغّل التنصيبَ صامتًا ويُغلق البرنامج؛ والتنصيبُ يفتحه من جديد.
+    والبياناتُ (الكتب المقروءة والمسوّدات والإعدادات) في مجلّد البيانات، فلا يمسّها التنصيب."""
+    if not common.FROZEN:
+        return {"error": "التحديثُ الذاتيّ في البرنامج المنصَّب وحده."}
+    exe = pathlib.Path(UPD.get("path") or "")
+    if UPD["state"] != "ready" or not exe.is_file():
+        return {"error": "لم يكتمل تنزيلُ التحديث."}
+    import maktaba
+    if maktaba.running():
+        run("maktaba.py", "stop")
+        for _ in range(40):                      # تُتمّ القراءةُ صفحتها ثمّ تقف (ننتظرها إلى عشرين ثانية)
+            if not maktaba.running():
+                break
+            time.sleep(0.5)
+    subprocess.Popen([str(exe), "/VERYSILENT", "/SUPPRESSMSGBOXES", "/NORESTART", "/CLOSEAPPLICATIONS", "/RELAUNCH"],
+                     close_fds=True, cwd=str(exe.parent), creationflags=0x00000008 | 0x00000200)  # DETACHED · NEW_GROUP
+    UPD["state"] = "installing"
+    threading.Timer(1.5, lambda: os._exit(0)).start()
+    return {"ok": True}
 
 
 def api_open_update(body: dict) -> dict:
@@ -898,6 +1002,7 @@ GET = {
     "/api/status": lambda q: {"text": run("maktaba.py", "status")[0].strip()},
     "/api/books": api_books,
     "/api/update-check": api_update_check,
+    "/api/selfupdate/job": api_selfupdate_job,
     "/api/coverage": api_coverage,
     "/api/groups": api_groups_get,
     "/api/cats": api_cats_get,
@@ -925,6 +1030,8 @@ POST = {
     "/api/stop": api_stop,
     "/api/open-settings": api_open_settings,
     "/api/open-update": api_open_update,
+    "/api/selfupdate/start": api_selfupdate_start,
+    "/api/selfupdate/install": api_selfupdate_install,
     "/api/tadqiq/start": api_tadqiq_start,
     "/api/exclusions": api_excl_set,
     "/api/drafts": api_drafts_set,
@@ -2524,9 +2631,31 @@ async function updCheck(manual){
   const msg='إصدارٌ جديد من «بُغية» متاح ('+AR(r.latest).replace(/\./g,'٫')+').';
   if(manual)res.textContent=msg;
   const b=$('#updbar');b.style.display='block';
-  b.innerHTML=esc(msg)+' نزّل ملفَّ التنصيب ثمّ شغّله، فيُنصَّب فوق هذا، وتبقى كتبُك ومكتبتُك كما هي. '+(r.url?'<button class="btn2" id="updget">نزّله</button> ':'')+'<button class="btn2" id="updno">لاحقًا</button>';
-  if(r.url)$('#updget').onclick=()=>api('/api/open-update',null,{url:r.url});
+  const news=(r.news||[]).length?' <span class="muted">الجديد فيه: '+r.news.map(esc).join('، ')+'.</span>':'';
+  if(r.self){
+    b.innerHTML=esc(msg)+news+'<br>يُنزَّل ويُنصَّب وحده، ثمّ يُفتح البرنامج من جديد، وتبقى كتبُك ومسوّداتُك كما هي. <button class="btn" id="updgo">حدّث الآن</button> <button class="btn2" id="updno">لاحقًا</button> <span id="updst"></span>';
+    $('#updgo').onclick=()=>selfUpdate();
+  }else{
+    b.innerHTML=esc(msg)+news+' نزّل ملفَّ التنصيب ثمّ شغّله، فيُنصَّب فوق هذا، وتبقى كتبُك ومكتبتُك كما هي. '+(r.url?'<button class="btn2" id="updget">نزّله</button> ':'')+'<button class="btn2" id="updno">لاحقًا</button>';
+    if(r.url)$('#updget').onclick=()=>api('/api/open-update',null,{url:r.url});
+  }
   $('#updno').onclick=()=>{b.style.display='none'};
+}
+// التحديثُ الذاتيّ: تنزيلٌ في الخلفيّة بمقياس، ثمّ مطابقةُ البصمة، ثمّ تنصيبٌ صامتٌ يُغلق البرنامجَ ويفتحه
+async function selfUpdate(){
+  const st=$('#updst'),go=$('#updgo'),no=$('#updno');go.disabled=true;
+  const s=await api('/api/selfupdate/start',null,{});
+  if(s.error){st.textContent=s.error;go.disabled=false;return}
+  while(true){
+    await new Promise(z=>setTimeout(z,700));
+    const j=await api('/api/selfupdate/job',{});
+    if(j.state=='downloading'){st.textContent=!j.got?'يبدأ التنزيل…':'يُنزَّل… '+(j.total?AR(Math.floor(100*j.got/j.total))+'٪':AR((j.got/1048576).toFixed(1))+' م.ب');continue}
+    if(j.state=='error'){st.textContent=j.reason||'تعذّر التحديث.';go.disabled=false;go.textContent='أعد المحاولة';return}
+    if(j.state=='ready')break;
+  }
+  st.textContent='نُزّل الملفّ وطابقت بصمتُه. يُغلق البرنامج الآن ويُفتح من جديد خلال دقيقة…';no.style.display='none';go.style.display='none';
+  const i=await api('/api/selfupdate/install',null,{});
+  if(i.error){st.textContent=i.error;go.style.display='';go.disabled=false}
 }
 $('#updchk').onclick=()=>{$('#updres').textContent='…';updCheck(true)};
 try{const k='bughya-updchk',t=+localStorage.getItem(k)||0;if(Date.now()-t>864e5){localStorage.setItem(k,Date.now());setTimeout(()=>updCheck(false),4000)}}catch(e){}
