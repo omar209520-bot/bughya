@@ -2550,7 +2550,7 @@ async function bkMake(){const b=$('#bkmk');b.disabled=true;$('#bktext').textCont
   if(r.cancelled||r.error){b.disabled=false;$('#bktext').innerHTML=r.error?'<span class="err">'+esc(r.error)+'</span>':'';return}
   $('#bkbar').style.display='none';$('#bkprog').style.display='block';$('#bkprog i').style.width='0';
   const t=setInterval(async()=>{const j=await api('/api/backup/job');
-    if(j.state=='running'){const p=Math.round(100*j.done/(j.total||1));$('#bkprog i').style.width=p+'%';$('#bktext').textContent='تُصنع النسخة… '+AR(p)+'٪';return}
+    if(j.state=='running'){const p=Math.round(100*j.done/(j.total||1));$('#bkprog i').style.width=p+'%';$('#bktext').textContent='تُصنع النسخة… '+AR(p)+'٪ (قد يستغرق ذلك دقيقة، فلا تغلق البرنامج)';return}
     clearInterval(t);$('#bkprog').style.display='none';b.disabled=false;
     if(j.state=='done'){$('#bktext').innerHTML='حُفظت النسخة ('+MB(j.result.size)+') في:<br>'+esc(j.result.path)+
       (j.same_drive?'<br><span class="err">تنبيه: حفظتَها على القرص نفسه الذي عليه البرنامج، فلا تحميك إن تعطّل الجهاز أو هُيِّئ. انسخها إلى ذاكرةٍ محمولة أو إلى Google Drive.</span>':'');loadBackup()}
@@ -2566,7 +2566,7 @@ function bkClose(){return '<div style="text-align:left;margin-top:8px"><button c
 function bkErr(e){bkr('<p class="err">'+esc(e)+'</p>'+bkClose());$('#bkrx').onclick=()=>BR.classList.remove('on')}
 async function bkRestore(){const r=await api('/api/backup/pick',null,{});if(r.cancelled)return;if(r.error)return bkErr(r.error);
   const m=r.manifest||{},s=m.summary||{};
-  bkr('<h3>استرجاعُ نسخة</h3><p>صُنعت هذه النسخة في '+esc(m.created||'')+'. عددُ كتبها: '+AR(s.books||0)+'، ومسوّداتها: '+AR(s.drafts||0)+(m.with_books?'، ومعها الكتبُ المسحوبة إلى البرنامج':'')+'.</p>'+
+  bkr('<h3>استرجاعُ نسخة</h3><p>صُنعت هذه النسخة في '+esc(AR(m.created||''))+'. عددُ كتبها: '+AR(s.books||0)+'، ومسوّداتها: '+AR(s.drafts||0)+(m.with_books?'، ومعها الكتبُ المسحوبة إلى البرنامج':'')+'.</p>'+
     '<p>ستحلّ محلَّ بياناتك الحاليّة في البرنامج. وتُحفظ بياناتُك الحاليّة قبل ذلك في مجلّد «قبل-الاسترجاع» داخل مجلّد بيانات البرنامج. ولا يُمسّ شيءٌ من ملفّات كتبك.</p>'+
     '<div style="text-align:left"><button class="btn" id="bkry">نعم، استرجعها</button> <button class="btn2" id="bkrn">إلغاء</button></div>');
   $('#bkrn').onclick=()=>BR.classList.remove('on');
