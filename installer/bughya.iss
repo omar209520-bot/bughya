@@ -3,7 +3,7 @@
 ; التنصيبُ للمستخدم وحده بلا صلاحيّات مدير، في %LOCALAPPDATA%\Programs\Bughya.
 ; بياناتُ المستخدم (الكتب المقروءة والإعدادات) في %LOCALAPPDATA%\Bughya ولا يمسّها الحذف.
 
-#define AppVer "0.9.5"
+#define AppVer "0.9.6"
 
 [Setup]
 AppId={{6B1F3C2E-8E1A-4D5B-9C1F-B06A0A9E2F11}
@@ -22,6 +22,9 @@ UninstallDisplayIcon={app}\Bughya.exe
 Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
+; التحديثُ من داخل البرنامج يشغّل التنصيبَ صامتًا بالوسيط /RELAUNCH: يُغلق ما بقي من البرنامج ثمّ يفتحه بعد التنصيب
+CloseApplications=force
+RestartApplications=no
 
 [Languages]
 Name: "arabic"; MessagesFile: "compiler:Languages\Arabic.isl"
@@ -39,3 +42,10 @@ Name: "{userdesktop}\بُغية"; Filename: "{app}\Bughya.exe"; Tasks: desktopic
 
 [Run]
 Filename: "{app}\Bughya.exe"; Description: "{cm:LaunchProgram,بُغية}"; Flags: nowait postinstall skipifsilent
+Filename: "{app}\Bughya.exe"; Flags: nowait skipifnotsilent; Check: WantRelaunch
+
+[Code]
+function WantRelaunch: Boolean;
+begin
+  Result := Pos('/RELAUNCH', UpperCase(GetCmdTail)) > 0;
+end;
