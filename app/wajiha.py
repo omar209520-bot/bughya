@@ -1565,7 +1565,7 @@ header .ver button{background:none;border:0;color:#e9e2c8;font:12px var(--ui);cu
 
 <!-- ═════ الكتب ═════ -->
 <section class="panel" id="p-books"><div class="wrap">
-<div class="row" style="margin:-4px 0 16px;align-items:center"><button type="button" class="btn3 gold" data-go="welcome">+ أضف كتبًا</button><button type="button" class="btn3" data-go="status">حال المكتبة</button></div>
+<div class="row" style="margin:-4px 0 16px;align-items:center"><button type="button" class="btn3 gold" data-go="welcome">+ أضف كتبًا</button><button type="button" class="btn3" data-go="status">حال المكتبة</button><button type="button" class="btn3" id="gobk">النسخة الاحتياطيّة</button></div>
 <div class="row" style="margin-bottom:20px;align-items:center"><input type="text" id="bf" placeholder="صفِّ بالعنوان أو المؤلّف" style="flex:1;max-width:420px;padding:5px 12px;border:1px solid var(--line);border-radius:3px;background:var(--card)"><span class="muted" id="bcount"></span></div>
 <div class="chips" id="bchips"></div>
 <div class="shelf" id="btab"></div></div></section>
@@ -2557,6 +2557,7 @@ async function bkMake(){const b=$('#bkmk');b.disabled=true;$('#bktext').textCont
     else $('#bktext').innerHTML='<span class="err">'+esc(j.error||'تعذّر صنعُ النسخة.')+'</span>'},700)}
 $('#bkmk').onclick=bkMake;
 $('#bkbarmk').onclick=()=>{show('status');bkMake()};
+$('#gobk').onclick=()=>{show('status');setTimeout(()=>$('#bkbox').scrollIntoView({behavior:'smooth',block:'center'}),150)};
 $('#bkbarno').onclick=async()=>{$('#bkbar').style.display='none';await api('/api/backup/snooze',null,{})};
 const BH=$('#bkhelp');$('#bkhelpo').onclick=()=>{BH.classList.add('on');$('#bkhelpx').focus({preventScroll:true});BH.querySelector('.abox').scrollTop=0};$('#bkhelpx').onclick=()=>BH.classList.remove('on');
 const BR=$('#bkrest');
