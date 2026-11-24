@@ -117,34 +117,6 @@ def api_image(q: dict) -> dict:
     return {"url": "/img/" + urllib.parse.quote(path.name) + "?t=%d" % time.time()}
 
 
-# «افتحها في بُغية»: يطلبها موصلُ Claude (mawsil.py)، فتُحفظ هنا وتأخذها الصفحةُ المفتوحة بـ/api/goto/next
-_goto = []
-WIN = [None]          # نافذةُ البرنامج (في run_app)، لتُقدَّم أمام غيرها حين تُطلب صفحة
-
-
-def api_goto(q: dict) -> dict:
-    req = {"b": int(q["b"]), "n": int(q["n"]), "mark": (q.get("mark") or "").strip()[:400], "t": time.time()}
-    with _lock:
-        _goto[:] = [req]
-    win = WIN[0]
-    if win is not None:
-        try:
-            win.restore()
-            win.on_top = True          # تقديمُ النافذة في ويندوز، ثمّ تعود كما كانت
-            win.on_top = False
-        except Exception:
-            pass
-    return {"ok": True, "window": win is not None}
-
-
-def api_goto_next(q: dict) -> dict:
-    with _lock:
-        req = _goto.pop() if _goto else None
-    if req is None or time.time() - req["t"] > 60:
-        return {}
-    return {k: req[k] for k in ("b", "n", "mark")}
-
-
 def api_ayat(q: dict):
     """الآياتُ في الصفحة، في متنها وحاشيتها كلٌّ على حدة، ولا يتغيّر نصُّ الكتاب."""
     import ayat
@@ -1025,8 +997,6 @@ GET = {
     "/api/page": lambda q: run_json("nass.py", q["b"], q["n"], "--json"),
     "/api/toc": lambda q: run_json("nass.py", q["b"], "--toc", "--json"),
     "/api/image": api_image,
-    "/api/goto": api_goto,
-    "/api/goto/next": api_goto_next,
     "/api/jiwar": lambda q: run_json("mustalah.py", "jiwar", q["q"], "--top", q.get("top", "25"), "--json"),
     "/api/measure": lambda q: run_json("mustalah.py", "measure", *[t for t in q["q"].split("\n") if t.strip()], "--json"),
     "/api/status": lambda q: {"text": run("maktaba.py", "status")[0].strip()},
@@ -1231,7 +1201,6 @@ def run_app() -> int:
         webview.settings["ALLOW_DOWNLOADS"] = True
         win = webview.create_window("بُغية", url, width=1280, height=840, min_size=(820, 560), text_select=True)
         win.events.shown += close_splash
-        WIN[0] = win
         webview.start(gui="edgechromium", private_mode=False, storage_path=str(common.DATA / "window"))
         if srv:
             srv.shutdown()
@@ -1742,10 +1711,6 @@ async function api(path,params,post){
 }
 async function copy(t){try{await navigator.clipboard.writeText(t)}catch(e){const a=document.createElement('textarea');a.value=t;document.body.appendChild(a);a.select();document.execCommand('copy');a.remove()}toast('نُسخ ✓')}
 setInterval(()=>fetch('/api/ping').catch(()=>{}),20000);
-// صفحةٌ يطلبها Claude (الموصل): تُفتح مع صورتها مظلَّلًا فيها النقل
-let GOTO=null;
-setInterval(async()=>{try{const r=await api('/api/goto/next');
-  if(r&&r.b){GOTO=r;imgFold=false;readBook(r.b,r.n,'books');setTab('img')}}catch(e){}},1500);
 
 // ── التبويبات
 document.querySelectorAll('header nav button').forEach(b=>b.onclick=()=>show(b.dataset.p));
@@ -2111,8 +2076,7 @@ function hl(t){
 }
 async function showImg(){
   const w=$('#pvimgw'),b=PV.b,n=PV.n;w.innerHTML='<div class="wait">الصورةُ تُجهَّز…</div>';
-  const g=GOTO&&GOTO.b==b&&GOTO.n==n?GOTO:null;
-  const mark=g&&g.mark?g.mark:S.mode=='phrase'&&S.q?S.q:'';
+  const mark=S.mode=='phrase'&&S.q?S.q:'';
   let r=await api('/api/image',{b,n,mark});
   if(r.error&&mark)r=await api('/api/image',{b,n,mark:''});
   if(PV.b!=b||PV.n!=n)return;

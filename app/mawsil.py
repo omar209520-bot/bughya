@@ -20,14 +20,9 @@ import os
 import pathlib
 import subprocess
 import sys
-import time
-import urllib.error
-import urllib.parse
-import urllib.request
 
 APP = pathlib.Path(__file__).resolve().parent
 TIMEOUT = 120
-PORT = int(os.environ.get("BUGHYA_PORT") or 8777)         # منفذُ صفحة بُغية (wajiha.py)
 
 # ما يُرسَل من بيانات الكتاب: لا مسارُ الملفّ ولا مجلّدُه ولا بصمتُه، فهي من جهاز الباحث لا من الكتاب
 BOOK_FIELDS = ("id", "title", "author", "death", "fann", "series", "volume", "unit", "pages", "done_pages",
@@ -42,9 +37,13 @@ INSTRUCTIONS = """\
 - كلُّ بحثٍ يبيّن التغطية: ما لم يُقرأ من الكتب لم يُبحث فيه؛ فلا تقل «ليس في كتبك» وفي المكتبة ما لم يُقرأ.
 - قبل أن تسلّم نقلًا معزوًّا إلى صفحة قابِله بها بـverify_quote، وانقل النصَّ كما في الصفحة.
 - ما في الحاشية (layer: حاشية) كلامُ المحقّق أو الشارح غالبًا، لا كلامُ المؤلّف.
-- لتُري الباحثَ صورةَ صفحةٍ (ولا سيّما المقروءةُ آليًّا قبل أن يعتمد نقلًا منها) افتحها له في بُغية بـopen_in_bughya، ومعها النقلُ
+- لتُري الباحثَ صورةَ صفحةٍ (ولا سيّما المقروءةُ آليًّا قبل أن يعتمد نقلًا منها) افتحها له بـshow_page_image، ومعها النقلُ
   ليُظلَّل في الصورة؛ فيقابله بعينه.
 """
+
+
+def esc(t: str) -> str:
+    return str(t).replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace('"', "&quot;")
 
 
 class ToolError(Exception):
@@ -127,57 +126,39 @@ def verify_quote(book: int, page: int, quote: str, layer: str = None) -> dict:
     return run("bawwaba", *args, ok_codes=(0, 1))        # الرمز ١: «غيرُ مطابق»، وهو حكمٌ لا خطأ
 
 
-def _bughya(path: str, timeout: float = 3) -> object:
-    """طلبٌ إلى صفحة بُغية العاملة على الجهاز. يعيد None إن لم تكن تعمل، و"old" إن كانت أقدمَ من الأداة."""
+def show_page_image(book: int, page: int, quote: str = None) -> dict:
+    """صورةُ الصفحة بأداة بُغية نفسها (sura.py)، تُفتح للباحث في متصفّحه في صفحةٍ صغيرةٍ فوقها العزو.
+    (لا في عارض الصور: قد يكون برنامجُ الصور في الجهاز غيرَ صالح، كأكروبات.)
+    لا تمسّ البرنامجَ المنصَّب ولا تحتاج إصدارًا منه، ولا يصل إلى Claude من الصورة شيء."""
+    args = [int(book), int(page), "--full"] + (["--mark", quote[:400]] if quote else [])
+    env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     try:
-        with urllib.request.urlopen("http://127.0.0.1:%d%s" % (PORT, path), timeout=timeout) as r:
-            return json.loads(r.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        return "old" if e.code == 404 else None
-    except (OSError, ValueError):
-        return None
-
-
-def _start_bughya() -> bool:
-    """يفتح برنامجَ بُغية المنصَّب إن لم يكن مفتوحًا، وينتظر صفحته."""
-    exe = pathlib.Path(os.environ.get("LOCALAPPDATA") or "") / "Programs" / "Bughya" / "Bughya.exe"
-    if not exe.is_file():
-        return False
-    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-    subprocess.Popen([str(exe)], cwd=str(exe.parent), creationflags=flags, close_fds=True,
-                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    for _ in range(40):
-        time.sleep(1)
-        if _bughya("/api/ping", 1) is not None:
-            return True
-    return False
-
-
-def open_in_bughya(book: int, page: int, quote: str = None) -> dict:
-    book, page = int(book), int(page)
-    info = run("nass", book, str(page))                     # يتحقّق من الكتاب والصفحة، ويعطي العزو
-    info = info[0] if isinstance(info, list) and info else {}
-    cite = info.get("cite")
-    if info.get("unit") not in (None, "صفحة"):
-        raise ToolError("هذا الكتاب بلا صفحاتٍ مرسومة (%s)؛ فلا صورةَ له. اقرأه بـread_page." % (info.get("unit") or ""))
-    if _bughya("/api/ping") is None and not _start_bughya():
-        raise ToolError("بُغية ليست مفتوحة، وتعذّر فتحُها؛ فليفتحها الباحثُ ثمّ أعد الطلب.")
-    q = urllib.parse.urlencode({"b": book, "n": page, "mark": (quote or "")[:400]})
-    res = _bughya("/api/goto?" + q)
-    if isinstance(res, dict) and res.get("ok"):
-        return {"opened": True, "cite": cite,
-                "note": "فُتحت الصفحة في بُغية مع صورتها" + ("، والنقلُ مظلَّلٌ فيها إن وُجد في أسطرها" if quote else "")}
-    if res == "old":
-        # إصدارٌ من بُغية لا يعرف هذا الطلب: تُفتح صورةُ الصفحة وحدها في عارض الصور
-        out = subprocess.run([sys.executable, str(APP / "sura.py"), str(book), str(page), "--full", "--open",
-                              *(["--mark", quote] if quote else [])], capture_output=True, cwd=str(APP),
-                             env=dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8"),
-                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=TIMEOUT)
-        if out.returncode == 0:
-            return {"opened": True, "cite": cite, "note": "إصدارُ بُغية المنصَّب أقدمُ من هذه الأداة، "
-                    "ففُتحت صورةُ الصفحة في عارض الصور بدل البرنامج"}
-        raise ToolError("تعذّر فتحُ صورة الصفحة.")
-    raise ToolError("لم تُجب بُغية؛ فليتأكّد الباحثُ أنّها مفتوحة.")
+        p = subprocess.run([sys.executable, str(APP / "sura.py"), *map(str, args)], capture_output=True, env=env,
+                           timeout=TIMEOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), cwd=str(APP))
+    except subprocess.TimeoutExpired:
+        raise ToolError("طال تجهيزُ الصورة أكثرَ من %d ثانية." % TIMEOUT)
+    lines = [x.strip() for x in p.stdout.decode("utf-8", "replace").splitlines() if x.strip()]
+    if p.returncode != 0 or not lines or not lines[0].startswith("صورةُ "):
+        err = next((x for x in reversed(lines) if x.startswith("✗")), "") or (lines[-1] if lines else "")
+        raise ToolError(err.lstrip("✗ ").strip() or "تعذّر فتحُ صورة الصفحة.")
+    cite, img = lines[0][len("صورةُ "):].rsplit(": ", 1)      # والمسارُ لا يُرسَل: هو من جهاز الباحث
+    img = pathlib.Path(img)
+    marked = bool(quote) and not any(x.startswith("لم أجد العبارة") for x in lines)
+    html = img.with_suffix(".html")
+    html.write_text(
+        '<!doctype html><html lang="ar" dir="rtl"><meta charset="utf-8"><title>%s</title>'
+        '<body style="margin:0;background:#eee;font:18px Tahoma,sans-serif">'
+        '<div style="padding:10px 16px;background:#24453a;color:#fff">%s%s</div>'
+        '<img src="%s" style="display:block;max-width:100%%;margin:12px auto;box-shadow:0 1px 6px #0003"></body></html>'
+        % (esc(cite), esc(cite), " — النقلُ مظلَّلٌ بالأصفر" if marked else "", esc(img.name)), encoding="utf-8")
+    if hasattr(os, "startfile"):
+        os.startfile(str(html))  # noqa: S606  (يفتحها المتصفّحُ الافتراضيّ)
+    else:
+        subprocess.run(["open" if sys.platform == "darwin" else "xdg-open", str(html)])
+    return {"opened": True, "cite": cite, "marked": marked,
+            "note": "فُتحت صورةُ الصفحة للباحث في متصفّحه" + (
+                "، والنقلُ مظلَّلٌ فيها" if marked else
+                "؛ ولم يوجد النقلُ في أسطرها المقروءة فلم يُظلَّل" if quote else "")}
 
 
 # ───────────────────────── الخادم ─────────────────────────
@@ -202,9 +183,9 @@ DOCS = {
     verify_quote: "قابِل نقلًا بالصفحة المعزوّ إليها قبل تسليمه. الأحكام: مطابقٌ حرفيًّا، مطابقٌ بلا تشكيل، "
                   "مطابقٌ بعد التطبيع (رسمٌ مخالف: صحّحه من الصفحة)، يمتدّ إلى الصفحة التالية، غيرُ مطابق (ومعه أقربُ ما في الصفحة). "
                   "layer: متن أو حاشية، إن عُزي إلى أحدهما.",
-    open_in_bughya: "افتح صفحةً في برنامج بُغية على جهاز الباحث (ويُفتح البرنامجُ إن كان مغلقًا)، مع صورتها ونصّها، "
-                    "ليراها بعينه ويقابل بها النقل. quote: النقلُ ليُظلَّل في الصورة. page رقمُ صفحة الملفّ (n). "
-                    "لا يصلك منها شيء؛ إنّما تُعرض للباحث.",
+    show_page_image: "افتح للباحث صورةَ صفحةٍ في متصفّحه على جهازه، ليراها بعينه ويقابل بها النقل "
+                     "(للكتب المصوَّرة والمطبوعة: بي دي إف والصور). quote: النقلُ ليُظلَّل في الصورة. "
+                     "page رقمُ صفحة الملفّ (n). لا يصلك منها شيء؛ إنّما تُعرض للباحث.",
 }
 
 
