@@ -20,9 +20,14 @@ import os
 import pathlib
 import subprocess
 import sys
+import time
+import urllib.error
+import urllib.parse
+import urllib.request
 
 APP = pathlib.Path(__file__).resolve().parent
 TIMEOUT = 120
+PORT = int(os.environ.get("BUGHYA_PORT") or 8777)         # منفذُ صفحة بُغية (wajiha.py)
 
 # ما يُرسَل من بيانات الكتاب: لا مسارُ الملفّ ولا مجلّدُه ولا بصمتُه، فهي من جهاز الباحث لا من الكتاب
 BOOK_FIELDS = ("id", "title", "author", "death", "fann", "series", "volume", "unit", "pages", "done_pages",
@@ -37,6 +42,8 @@ INSTRUCTIONS = """\
 - كلُّ بحثٍ يبيّن التغطية: ما لم يُقرأ من الكتب لم يُبحث فيه؛ فلا تقل «ليس في كتبك» وفي المكتبة ما لم يُقرأ.
 - قبل أن تسلّم نقلًا معزوًّا إلى صفحة قابِله بها بـverify_quote، وانقل النصَّ كما في الصفحة.
 - ما في الحاشية (layer: حاشية) كلامُ المحقّق أو الشارح غالبًا، لا كلامُ المؤلّف.
+- لتُري الباحثَ صورةَ صفحةٍ (ولا سيّما المقروءةُ آليًّا قبل أن يعتمد نقلًا منها) افتحها له في بُغية بـopen_in_bughya، ومعها النقلُ
+  ليُظلَّل في الصورة؛ فيقابله بعينه.
 """
 
 
@@ -120,6 +127,59 @@ def verify_quote(book: int, page: int, quote: str, layer: str = None) -> dict:
     return run("bawwaba", *args, ok_codes=(0, 1))        # الرمز ١: «غيرُ مطابق»، وهو حكمٌ لا خطأ
 
 
+def _bughya(path: str, timeout: float = 3) -> object:
+    """طلبٌ إلى صفحة بُغية العاملة على الجهاز. يعيد None إن لم تكن تعمل، و"old" إن كانت أقدمَ من الأداة."""
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:%d%s" % (PORT, path), timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8"))
+    except urllib.error.HTTPError as e:
+        return "old" if e.code == 404 else None
+    except (OSError, ValueError):
+        return None
+
+
+def _start_bughya() -> bool:
+    """يفتح برنامجَ بُغية المنصَّب إن لم يكن مفتوحًا، وينتظر صفحته."""
+    exe = pathlib.Path(os.environ.get("LOCALAPPDATA") or "") / "Programs" / "Bughya" / "Bughya.exe"
+    if not exe.is_file():
+        return False
+    flags = getattr(subprocess, "DETACHED_PROCESS", 0) | getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
+    subprocess.Popen([str(exe)], cwd=str(exe.parent), creationflags=flags, close_fds=True,
+                     stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    for _ in range(40):
+        time.sleep(1)
+        if _bughya("/api/ping", 1) is not None:
+            return True
+    return False
+
+
+def open_in_bughya(book: int, page: int, quote: str = None) -> dict:
+    book, page = int(book), int(page)
+    info = run("nass", book, str(page))                     # يتحقّق من الكتاب والصفحة، ويعطي العزو
+    info = info[0] if isinstance(info, list) and info else {}
+    cite = info.get("cite")
+    if info.get("unit") not in (None, "صفحة"):
+        raise ToolError("هذا الكتاب بلا صفحاتٍ مرسومة (%s)؛ فلا صورةَ له. اقرأه بـread_page." % (info.get("unit") or ""))
+    if _bughya("/api/ping") is None and not _start_bughya():
+        raise ToolError("بُغية ليست مفتوحة، وتعذّر فتحُها؛ فليفتحها الباحثُ ثمّ أعد الطلب.")
+    q = urllib.parse.urlencode({"b": book, "n": page, "mark": (quote or "")[:400]})
+    res = _bughya("/api/goto?" + q)
+    if isinstance(res, dict) and res.get("ok"):
+        return {"opened": True, "cite": cite,
+                "note": "فُتحت الصفحة في بُغية مع صورتها" + ("، والنقلُ مظلَّلٌ فيها إن وُجد في أسطرها" if quote else "")}
+    if res == "old":
+        # إصدارٌ من بُغية لا يعرف هذا الطلب: تُفتح صورةُ الصفحة وحدها في عارض الصور
+        out = subprocess.run([sys.executable, str(APP / "sura.py"), str(book), str(page), "--full", "--open",
+                              *(["--mark", quote] if quote else [])], capture_output=True, cwd=str(APP),
+                             env=dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8"),
+                             creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), timeout=TIMEOUT)
+        if out.returncode == 0:
+            return {"opened": True, "cite": cite, "note": "إصدارُ بُغية المنصَّب أقدمُ من هذه الأداة، "
+                    "ففُتحت صورةُ الصفحة في عارض الصور بدل البرنامج"}
+        raise ToolError("تعذّر فتحُ صورة الصفحة.")
+    raise ToolError("لم تُجب بُغية؛ فليتأكّد الباحثُ أنّها مفتوحة.")
+
+
 # ───────────────────────── الخادم ─────────────────────────
 
 DOCS = {
@@ -142,6 +202,9 @@ DOCS = {
     verify_quote: "قابِل نقلًا بالصفحة المعزوّ إليها قبل تسليمه. الأحكام: مطابقٌ حرفيًّا، مطابقٌ بلا تشكيل، "
                   "مطابقٌ بعد التطبيع (رسمٌ مخالف: صحّحه من الصفحة)، يمتدّ إلى الصفحة التالية، غيرُ مطابق (ومعه أقربُ ما في الصفحة). "
                   "layer: متن أو حاشية، إن عُزي إلى أحدهما.",
+    open_in_bughya: "افتح صفحةً في برنامج بُغية على جهاز الباحث (ويُفتح البرنامجُ إن كان مغلقًا)، مع صورتها ونصّها، "
+                    "ليراها بعينه ويقابل بها النقل. quote: النقلُ ليُظلَّل في الصورة. page رقمُ صفحة الملفّ (n). "
+                    "لا يصلك منها شيء؛ إنّما تُعرض للباحث.",
 }
 
 
