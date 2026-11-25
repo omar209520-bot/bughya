@@ -22,6 +22,14 @@ import subprocess
 import sys
 
 APP = pathlib.Path(__file__).resolve().parent
+FROZEN = bool(getattr(sys, "frozen", False))      # البرنامجُ المبنيّ (إضافةُ Claude): أدواتُه فيه هو
+
+
+def tool_cmd(tool: str) -> list:
+    """أمرُ تشغيل أداةٍ من أدوات بُغية: بايثون والملفّ، أو البرنامجُ المبنيّ نفسُه بـ--tool (كما في Bughya.exe)."""
+    if FROZEN:
+        return [sys.executable, "--tool", tool]
+    return [sys.executable, str(APP / (tool + ".py"))]
 TIMEOUT = 120
 
 # ما يُرسَل من بيانات الكتاب: لا مسارُ الملفّ ولا مجلّدُه ولا بصمتُه، فهي من جهاز الباحث لا من الكتاب
@@ -55,8 +63,8 @@ def run(tool: str, *args, ok_codes=(0,)) -> object:
     env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)          # لا تومض نافذةُ طرفيّة في ويندوز
     try:
-        p = subprocess.run([sys.executable, str(APP / (tool + ".py")), *map(str, args), "--json"],
-                           capture_output=True, env=env, timeout=TIMEOUT, creationflags=flags, cwd=str(APP))
+        p = subprocess.run([*tool_cmd(tool), *map(str, args), "--json"],
+                           capture_output=True, env=env, timeout=TIMEOUT, creationflags=flags, cwd=str(APP) if not FROZEN else None)
     except subprocess.TimeoutExpired:
         raise ToolError("طال البحثُ أكثرَ من %d ثانية؛ ضيّقه بكتبٍ أو بعبارةٍ أطول." % TIMEOUT)
     out = p.stdout.decode("utf-8", "replace").strip()
@@ -133,7 +141,7 @@ def show_page_image(book: int, page: int, quote: str = None) -> dict:
     args = [int(book), int(page), "--full"] + (["--mark", quote[:400]] if quote else [])
     env = dict(os.environ, PYTHONUTF8="1", PYTHONIOENCODING="utf-8")
     try:
-        p = subprocess.run([sys.executable, str(APP / "sura.py"), *map(str, args)], capture_output=True, env=env,
+        p = subprocess.run([*tool_cmd("sura"), *map(str, args)], capture_output=True, env=env,
                            timeout=TIMEOUT, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0), cwd=str(APP))
     except subprocess.TimeoutExpired:
         raise ToolError("طال تجهيزُ الصورة أكثرَ من %d ثانية." % TIMEOUT)

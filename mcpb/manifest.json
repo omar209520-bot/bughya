@@ -1,0 +1,32 @@
+{
+  "$schema": "https://raw.githubusercontent.com/anthropics/mcpb/main/schemas/mcpb-manifest-v0.4.schema.json",
+  "manifest_version": "0.4",
+  "name": "bughya",
+  "display_name": "Bughya — بُغية",
+  "version": "0.1.1",
+  "description": "يبحث في كتبك التي قرأها برنامج «بُغية» على جهازك، ويقرأ صفحاتها، ويقابل النقول بها، ويفتح لك صورة الصفحة.",
+  "long_description": "موصلٌ للقراءة وحدها: يقرأ مكتبة «بُغية» على جهازك، ولا يكتب فيها شيئًا، ولا يتّصل بالإنترنت. ويلزمه أن يكون برنامج بُغية منصَّبًا وقد قرأ كتبك. وما يصل إلى Claude المقاطعُ والصفحاتُ التي يطلبها، لا الكتب.",
+  "author": { "name": "Omar Elmnfi" },
+  "license": "AGPL-3.0-only",
+  "icon": "icon.png",
+  "server": {
+    "type": "binary",
+    "entry_point": "server/BughyaClaude.exe",
+    "mcp_config": {
+      "command": "${__dirname}/server/BughyaClaude.exe",
+      "args": []
+    }
+  },
+  "tools": [
+    { "name": "search_library", "description": "البحث في كتب المكتبة المقروءة" },
+    { "name": "read_page", "description": "قراءة صفحة كاملة بعزوها" },
+    { "name": "read_around", "description": "قراءة ما حول كلّ موضعٍ لعبارةٍ في كتاب" },
+    { "name": "book_toc", "description": "فهرس الكتاب" },
+    { "name": "list_books", "description": "كتب المكتبة" },
+    { "name": "verify_quote", "description": "مقابلة النقل بصفحته" },
+    { "name": "show_page_image", "description": "فتح صورة الصفحة للباحث والنقل مظلَّل فيها" }
+  ],
+  "compatibility": {
+    "platforms": ["win32"]
+  }
+}
